@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { Header } from '../../components/layout/Header';
 import { Button } from '../../components/ui/Button';
@@ -14,71 +14,143 @@ import {
   TableRow,
 } from '../../components/ui/Table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
-import { ArrowLeft, Edit, Phone, Mail, MapPin, Calendar, Award, ShoppingBag, DollarSign, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Edit, Phone, Mail, MapPin, Calendar, Award, ShoppingBag, DollarSign, TrendingUp, RefreshCw } from 'lucide-react';
 
-// Mock data
-const mockCustomer = {
-  id: 'cust-1',
-  code: 'CUS0001',
-  name: 'Nguyễn Văn A',
-  phone: '+1-555-1001',
-  email: 'customer1@email.com',
-  dateOfBirth: '1985-05-15',
-  address: 'Số 123 Đường ABC, Quận 1, TP.HCM',
-  membershipTier: 'gold' as const,
-  points: 850,
-  joinDate: '2024-01-15',
-  status: 'active',
-};
+interface SalesOrder {
+  id: string;
+  invoiceNumber: string;
+  saleDate: string;
+  totalAmount: number;
+  paymentMethod: string;
+  pointsEarned: number;
+  items?: any[];
+}
 
-const mockPurchaseHistory = Array.from({ length: 30 }, (_, i) => ({
-  id: `sale-${i + 1}`,
-  invoiceNumber: `INV${new Date().getFullYear()}${String(i + 1).padStart(5, '0')}`,
-  saleDate: new Date(2024, (11 - i) % 12, (i % 28) + 1).toISOString().split('T')[0],
-  itemCount: 2 + (i % 5),
-  total: 50 + i * 15,
-  paymentMethod: ['cash', 'card', 'transfer'][i % 3] as 'cash' | 'card' | 'transfer',
-  pointsEarned: Math.floor((50 + i * 15) / 10),
-}));
+interface PointsHistoryEntry {
+  id: string;
+  date: string;
+  type: 'earn' | 'redeem';
+  points: number;
+  description: string;
+  balance: number;
+}
 
-const mockPointsHistory = Array.from({ length: 15 }, (_, i) => ({
-  id: `point-${i + 1}`,
-  date: new Date(2024, (11 - i) % 12, (i % 28) + 1).toISOString().split('T')[0],
-  type: i % 3 === 0 ? 'redeem' : 'earn',
-  points: i % 3 === 0 ? -(50 + i * 5) : 50 + i * 10,
-  description: i % 3 === 0 ? 'Đổi điểm lấy voucher' : `Mua hàng - ${`INV${new Date().getFullYear()}${String(i + 1).padStart(5, '0')}`}`,
-  balance: 850 + (15 - i) * 20,
-}));
+interface CustomerDetail {
+  id: string;
+  code: string;
+  name: string;
+  phone: string;
+  email?: string;
+  dateOfBirth?: string;
+  address?: string;
+  membershipTier: 'bronze' | 'silver' | 'gold' | 'platinum';
+  points: number;
+  joinDate: string;
+  status: string;
+  salesOrders: SalesOrder[];
+  pointsHistory: PointsHistoryEntry[];
+}
 
 export function CustomerDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [customer, setCustomer] = useState<CustomerDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [purchasePage, setPurchasePage] = useState(1);
   const [purchaseSize, setPurchaseSize] = useState(10);
   const [pointsPage, setPointsPage] = useState(1);
   const [pointsSize, setPointsSize] = useState(10);
 
-  const purchaseTotalItems = mockPurchaseHistory.length;
+  const fetchCustomer = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('pharmacy_token');
+      if (!token) throw new Error('Phiên đăng nhập đã hết.');
+
+      const response = await fetch(`http://localhost:3000/api/customers/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Lỗi ${response.status}`);
+      }
+
+      const data = await response.json();
+      setCustomer(data);
+    } catch (err: any) {
+      const msg =
+        err instanceof TypeError
+          ? 'Không thể kết nối máy chủ.'
+          : err.message || 'Không thể tải thông tin khách hàng.';
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) fetchCustomer();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div>
+        <Header title="Đang tải..." subtitle="Vui lòng chờ" />
+        <div className="flex items-center justify-center py-20">
+          <RefreshCw className="h-6 w-6 animate-spin text-primary mr-3" />
+          <span className="text-muted-foreground">Đang tải thông tin khách hàng...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !customer) {
+    return (
+      <div>
+        <Header title="Lỗi" subtitle="Không thể tải dữ liệu" />
+        <div className="p-6 text-center">
+          <p className="text-destructive font-medium mb-4">{error || 'Không tìm thấy khách hàng.'}</p>
+          <div className="flex items-center justify-center gap-3">
+            <Button variant="outline" onClick={() => navigate('/customers')}>
+              <ArrowLeft className="h-4 w-4 mr-2" /> Quay lại
+            </Button>
+            <Button onClick={() => fetchCustomer()}>
+              <RefreshCw className="h-4 w-4 mr-2" /> Thử lại
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const purchaseHistory = customer.salesOrders || [];
+  const pointsHistory = customer.pointsHistory || [];
+
+  const purchaseTotalItems = purchaseHistory.length;
   const purchaseTotalPages = Math.ceil(purchaseTotalItems / purchaseSize);
-  const paginatedPurchases = mockPurchaseHistory.slice(
+  const paginatedPurchases = purchaseHistory.slice(
     (purchasePage - 1) * purchaseSize,
     purchasePage * purchaseSize
   );
 
-  const pointsTotalItems = mockPointsHistory.length;
+  const pointsTotalItems = pointsHistory.length;
   const pointsTotalPages = Math.ceil(pointsTotalItems / pointsSize);
-  const paginatedPoints = mockPointsHistory.slice(
+  const paginatedPoints = pointsHistory.slice(
     (pointsPage - 1) * pointsSize,
     pointsPage * pointsSize
   );
 
   const stats = {
-    totalOrders: mockPurchaseHistory.length,
-    totalSpent: mockPurchaseHistory.reduce((sum, order) => sum + order.total, 0),
-    totalPoints: mockCustomer.points,
-    avgOrderValue: Math.round(
-      mockPurchaseHistory.reduce((sum, order) => sum + order.total, 0) / mockPurchaseHistory.length
-    ),
+    totalOrders: purchaseHistory.length,
+    totalSpent: purchaseHistory.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
+    totalPoints: customer.points,
+    avgOrderValue: purchaseHistory.length > 0
+      ? Math.round(purchaseHistory.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0) / purchaseHistory.length)
+      : 0,
   };
 
   const getTierColor = (tier: string) => {
@@ -110,11 +182,23 @@ export function CustomerDetail() {
     return labels[method as keyof typeof labels] || method;
   };
 
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString('vi-VN') + 'đ';
+  };
+
+  // Calculate next tier threshold
+  const tierThresholds = { bronze: 500, silver: 1000, gold: 2000, platinum: Infinity };
+  const nextTierThreshold = tierThresholds[customer.membershipTier as keyof typeof tierThresholds] || 1000;
+  const pointsToNextTier = Math.max(0, nextTierThreshold - customer.points);
+  const progressPercent = customer.membershipTier === 'platinum'
+    ? 100
+    : Math.min(100, (customer.points / nextTierThreshold) * 100);
+
   return (
     <div>
       <Header
-        title={mockCustomer.name}
-        subtitle={`Mã khách hàng: ${mockCustomer.code}`}
+        title={customer.name}
+        subtitle={`Mã khách hàng: ${customer.code}`}
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate('/customers')}>
@@ -151,7 +235,7 @@ export function CustomerDetail() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Tổng chi tiêu</p>
-                <h3 className="text-2xl font-semibold">${stats.totalSpent}</h3>
+                <h3 className="text-2xl font-semibold">{formatCurrency(stats.totalSpent)}</h3>
               </div>
             </div>
           </Card>
@@ -163,7 +247,7 @@ export function CustomerDetail() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Điểm tích lũy</p>
-                <h3 className="text-2xl font-semibold">{stats.totalPoints}</h3>
+                <h3 className="text-2xl font-semibold">{stats.totalPoints.toLocaleString()}</h3>
               </div>
             </div>
           </Card>
@@ -175,7 +259,7 @@ export function CustomerDetail() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Giá trị TB/đơn</p>
-                <h3 className="text-2xl font-semibold">${stats.avgOrderValue}</h3>
+                <h3 className="text-2xl font-semibold">{formatCurrency(stats.avgOrderValue)}</h3>
               </div>
             </div>
           </Card>
@@ -184,8 +268,8 @@ export function CustomerDetail() {
         <Tabs defaultValue="info">
           <TabsList>
             <TabsTrigger value="info">Thông tin chi tiết</TabsTrigger>
-            <TabsTrigger value="purchases">Lịch sử mua hàng</TabsTrigger>
-            <TabsTrigger value="points">Lịch sử điểm</TabsTrigger>
+            <TabsTrigger value="purchases">Lịch sử mua hàng ({purchaseHistory.length})</TabsTrigger>
+            <TabsTrigger value="points">Lịch sử điểm ({pointsHistory.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-6">
@@ -198,24 +282,26 @@ export function CustomerDetail() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-muted-foreground">Mã khách hàng</p>
-                      <p className="font-mono font-medium">{mockCustomer.code}</p>
+                      <p className="font-mono font-medium">{customer.code}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Trạng thái</p>
-                      <Badge variant="success">Hoạt động</Badge>
+                      <Badge variant={customer.status === 'active' ? 'success' : 'default'}>
+                        {customer.status === 'active' ? 'Hoạt động' : 'Ngưng hoạt động'}
+                      </Badge>
                     </div>
                   </div>
 
                   <div>
                     <p className="text-sm text-muted-foreground">Họ và tên</p>
-                    <p className="font-medium text-lg">{mockCustomer.name}</p>
+                    <p className="font-medium text-lg">{customer.name}</p>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
                     <div className="flex-1">
                       <p className="text-sm text-muted-foreground">Số điện thoại</p>
-                      <p className="font-medium">{mockCustomer.phone}</p>
+                      <p className="font-medium">{customer.phone}</p>
                     </div>
                   </div>
 
@@ -223,7 +309,7 @@ export function CustomerDetail() {
                     <Mail className="h-4 w-4 text-muted-foreground" />
                     <div className="flex-1">
                       <p className="text-sm text-muted-foreground">Email</p>
-                      <p className="font-medium">{mockCustomer.email}</p>
+                      <p className="font-medium">{customer.email || '—'}</p>
                     </div>
                   </div>
 
@@ -231,7 +317,7 @@ export function CustomerDetail() {
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <div className="flex-1">
                       <p className="text-sm text-muted-foreground">Ngày sinh</p>
-                      <p className="font-medium">{mockCustomer.dateOfBirth}</p>
+                      <p className="font-medium">{customer.dateOfBirth || '—'}</p>
                     </div>
                   </div>
 
@@ -239,7 +325,7 @@ export function CustomerDetail() {
                     <MapPin className="h-4 w-4 text-muted-foreground mt-1" />
                     <div className="flex-1">
                       <p className="text-sm text-muted-foreground">Địa chỉ</p>
-                      <p className="font-medium">{mockCustomer.address}</p>
+                      <p className="font-medium">{customer.address || '—'}</p>
                     </div>
                   </div>
 
@@ -247,7 +333,7 @@ export function CustomerDetail() {
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <div className="flex-1">
                       <p className="text-sm text-muted-foreground">Ngày tham gia</p>
-                      <p className="font-medium">{mockCustomer.joinDate}</p>
+                      <p className="font-medium">{customer.joinDate}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -260,9 +346,9 @@ export function CustomerDetail() {
                 <CardContent className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground mb-2">Hạng thành viên</p>
-                    <Badge variant={getTierColor(mockCustomer.membershipTier) as any} className="text-lg px-4 py-2">
+                    <Badge variant={getTierColor(customer.membershipTier) as any} className="text-lg px-4 py-2">
                       <Award className="h-5 w-5 mr-2" />
-                      {getTierLabel(mockCustomer.membershipTier).toUpperCase()}
+                      {getTierLabel(customer.membershipTier).toUpperCase()}
                     </Badge>
                   </div>
 
@@ -270,38 +356,40 @@ export function CustomerDetail() {
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-sm font-medium">Điểm tích lũy hiện tại</p>
                       <p className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">
-                        {mockCustomer.points}
+                        {customer.points.toLocaleString()}
                       </p>
                     </div>
                     <div className="h-2 bg-yellow-200 dark:bg-yellow-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-yellow-500 dark:bg-yellow-400"
-                        style={{ width: `${(mockCustomer.points % 1000) / 10}%` }}
+                        className="h-full bg-yellow-500 dark:bg-yellow-400 transition-all duration-500"
+                        style={{ width: `${progressPercent}%` }}
                       />
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
-                      Còn {1000 - (mockCustomer.points % 1000)} điểm để lên hạng tiếp theo
+                      {customer.membershipTier === 'platinum'
+                        ? 'Bạn đang ở hạng cao nhất! 🎉'
+                        : `Còn ${pointsToNextTier.toLocaleString()} điểm để lên hạng tiếp theo`}
                     </p>
                   </div>
 
                   <div className="space-y-3 pt-4 border-t">
-                    <h4 className="font-semibold">Ưu đãi của hạng {getTierLabel(mockCustomer.membershipTier)}</h4>
+                    <h4 className="font-semibold">Ưu đãi của hạng {getTierLabel(customer.membershipTier)}</h4>
                     <ul className="space-y-2">
                       <li className="flex items-start gap-2 text-sm">
                         <span className="text-green-600 dark:text-green-400 mt-0.5">✓</span>
-                        <span>Giảm giá {mockCustomer.membershipTier === 'platinum' ? '15%' : mockCustomer.membershipTier === 'gold' ? '10%' : mockCustomer.membershipTier === 'silver' ? '5%' : '2%'} cho mọi đơn hàng</span>
+                        <span>Giảm giá {customer.membershipTier === 'platinum' ? '15%' : customer.membershipTier === 'gold' ? '10%' : customer.membershipTier === 'silver' ? '5%' : '2%'} cho mọi đơn hàng</span>
                       </li>
                       <li className="flex items-start gap-2 text-sm">
                         <span className="text-green-600 dark:text-green-400 mt-0.5">✓</span>
-                        <span>Tích điểm gấp {mockCustomer.membershipTier === 'platinum' ? '3' : mockCustomer.membershipTier === 'gold' ? '2' : '1'} lần</span>
+                        <span>Tích điểm gấp {customer.membershipTier === 'platinum' ? '3' : customer.membershipTier === 'gold' ? '2' : '1'} lần</span>
                       </li>
-                      {(mockCustomer.membershipTier === 'gold' || mockCustomer.membershipTier === 'platinum') && (
+                      {(customer.membershipTier === 'gold' || customer.membershipTier === 'platinum') && (
                         <li className="flex items-start gap-2 text-sm">
                           <span className="text-green-600 dark:text-green-400 mt-0.5">✓</span>
                           <span>Miễn phí giao hàng</span>
                         </li>
                       )}
-                      {mockCustomer.membershipTier === 'platinum' && (
+                      {customer.membershipTier === 'platinum' && (
                         <li className="flex items-start gap-2 text-sm">
                           <span className="text-green-600 dark:text-green-400 mt-0.5">✓</span>
                           <span>Tư vấn dược sĩ miễn phí 24/7</span>
@@ -320,50 +408,60 @@ export function CustomerDetail() {
                 <CardTitle>Lịch sử mua hàng</CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Mã hóa đơn</TableHead>
-                      <TableHead>Ngày mua</TableHead>
-                      <TableHead>Số sản phẩm</TableHead>
-                      <TableHead>Tổng tiền</TableHead>
-                      <TableHead>Thanh toán</TableHead>
-                      <TableHead>Điểm nhận</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedPurchases.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="font-mono text-sm font-medium">
-                          {order.invoiceNumber}
-                        </TableCell>
-                        <TableCell>{order.saleDate}</TableCell>
-                        <TableCell>{order.itemCount} sản phẩm</TableCell>
-                        <TableCell className="font-semibold">${order.total}</TableCell>
-                        <TableCell>
-                          <Badge variant="info">{getPaymentMethodLabel(order.paymentMethod)}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-yellow-600 dark:text-yellow-400 font-medium">
-                            +{order.pointsEarned} điểm
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                {purchaseHistory.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    Khách hàng chưa có lịch sử mua hàng.
+                  </div>
+                ) : (
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Mã hóa đơn</TableHead>
+                          <TableHead>Ngày mua</TableHead>
+                          <TableHead>Tổng tiền</TableHead>
+                          <TableHead>Thanh toán</TableHead>
+                          <TableHead>Điểm nhận</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedPurchases.map((order) => (
+                          <TableRow key={order.id}>
+                            <TableCell className="font-mono text-sm font-medium">
+                              {order.invoiceNumber}
+                            </TableCell>
+                            <TableCell>
+                              {new Date(order.saleDate).toLocaleDateString('vi-VN')}
+                            </TableCell>
+                            <TableCell className="font-semibold">
+                              {formatCurrency(Number(order.totalAmount || 0))}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="info">{getPaymentMethodLabel(order.paymentMethod)}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-yellow-600 dark:text-yellow-400 font-medium">
+                                +{order.pointsEarned} điểm
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
 
-                <TablePagination
-                  page={purchasePage}
-                  size={purchaseSize}
-                  totalItems={purchaseTotalItems}
-                  totalPages={purchaseTotalPages}
-                  onPageChange={setPurchasePage}
-                  onSizeChange={(s) => {
-                    setPurchaseSize(s);
-                    setPurchasePage(1);
-                  }}
-                />
+                    <TablePagination
+                      page={purchasePage}
+                      size={purchaseSize}
+                      totalItems={purchaseTotalItems}
+                      totalPages={purchaseTotalPages}
+                      onPageChange={setPurchasePage}
+                      onSizeChange={(s) => {
+                        setPurchaseSize(s);
+                        setPurchasePage(1);
+                      }}
+                    />
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -374,48 +472,56 @@ export function CustomerDetail() {
                 <CardTitle>Lịch sử điểm tích lũy</CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ngày</TableHead>
-                      <TableHead>Loại giao dịch</TableHead>
-                      <TableHead>Mô tả</TableHead>
-                      <TableHead>Điểm thay đổi</TableHead>
-                      <TableHead>Số dư</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedPoints.map((point) => (
-                      <TableRow key={point.id}>
-                        <TableCell>{point.date}</TableCell>
-                        <TableCell>
-                          <Badge variant={point.type === 'earn' ? 'success' : 'warning'}>
-                            {point.type === 'earn' ? 'Tích điểm' : 'Đổi điểm'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{point.description}</TableCell>
-                        <TableCell>
-                          <span className={point.points > 0 ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-red-600 dark:text-red-400 font-semibold'}>
-                            {point.points > 0 ? '+' : ''}{point.points}
-                          </span>
-                        </TableCell>
-                        <TableCell className="font-medium">{point.balance}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                {pointsHistory.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    Chưa có lịch sử tích điểm.
+                  </div>
+                ) : (
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ngày</TableHead>
+                          <TableHead>Loại giao dịch</TableHead>
+                          <TableHead>Mô tả</TableHead>
+                          <TableHead>Điểm thay đổi</TableHead>
+                          <TableHead>Số dư</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedPoints.map((point) => (
+                          <TableRow key={point.id}>
+                            <TableCell>{point.date}</TableCell>
+                            <TableCell>
+                              <Badge variant={point.type === 'earn' ? 'success' : 'warning'}>
+                                {point.type === 'earn' ? 'Tích điểm' : 'Đổi điểm'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{point.description}</TableCell>
+                            <TableCell>
+                              <span className={point.points > 0 ? 'text-green-600 dark:text-green-400 font-semibold' : 'text-red-600 dark:text-red-400 font-semibold'}>
+                                {point.points > 0 ? '+' : ''}{point.points}
+                              </span>
+                            </TableCell>
+                            <TableCell className="font-medium">{point.balance}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
 
-                <TablePagination
-                  page={pointsPage}
-                  size={pointsSize}
-                  totalItems={pointsTotalItems}
-                  totalPages={pointsTotalPages}
-                  onPageChange={setPointsPage}
-                  onSizeChange={(s) => {
-                    setPointsSize(s);
-                    setPointsPage(1);
-                  }}
-                />
+                    <TablePagination
+                      page={pointsPage}
+                      size={pointsSize}
+                      totalItems={pointsTotalItems}
+                      totalPages={pointsTotalPages}
+                      onPageChange={setPointsPage}
+                      onSizeChange={(s) => {
+                        setPointsSize(s);
+                        setPointsPage(1);
+                      }}
+                    />
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

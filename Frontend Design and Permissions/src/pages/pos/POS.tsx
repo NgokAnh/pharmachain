@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import { Header } from '../../components/layout/Header';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Select } from '../../components/ui/Select';
-import { Trash2, ShoppingCart, Barcode, Camera, Upload, Check, AlertTriangle, ShieldCheck, FileText, RefreshCw } from 'lucide-react';
+import { Trash2, ShoppingCart, Barcode, Camera, Upload, Check, AlertTriangle, ShieldCheck, FileText, RefreshCw, Search, UserPlus, X, Users, Store, Gift, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { InventoryLine } from '../../types';
+import { InventoryLine, Customer } from '../../types';
 import {
   buildConversionSummary,
   getTransactionUnitOptions,
@@ -142,10 +143,19 @@ function mapInventoryToAvailableMedicines(inventoryLots: InventoryLotResponse[])
 }
 
 export function POS() {
+  const { user } = useAuth();
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(user?.branchId || '');
+  const isFirstMount = useRef(true);
+
   const [barcode, setBarcode] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [customerId, setCustomerId] = useState('');
-  const [customerTier, setCustomerTier] = useState<'normal' | 'silver' | 'gold' | 'platinum'>('normal');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerResults, setCustomerResults] = useState<Customer[]>([]);
+  const [isCustomerSearching, setIsCustomerSearching] = useState(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const customerTier = (selectedCustomer?.membershipTier as 'normal' | 'silver' | 'gold' | 'platinum') || 'normal';
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
   const [prescriptionId, setPrescriptionId] = useState('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -235,6 +245,13 @@ export function POS() {
   };
 
   const loadAvailableMedicines = async (signal?: AbortSignal, showLoader = true) => {
+    const isAdminOrChainManager = user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER';
+    if (isAdminOrChainManager && !selectedBranchId) {
+      setMedicines([]);
+      setIsMedicinesLoading(false);
+      return;
+    }
+
     if (showLoader) {
       setIsMedicinesLoading(true);
     }
@@ -246,7 +263,11 @@ export function POS() {
         throw new Error('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.');
       }
 
-      const response = await fetch('http://localhost:3000/api/inventory', {
+      const url = selectedBranchId
+        ? `http://localhost:3000/api/inventory?branchId=${selectedBranchId}`
+        : 'http://localhost:3000/api/inventory';
+
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal,
       });
@@ -301,18 +322,150 @@ export function POS() {
     }
   };
 
-  // Fetch medicines directly from branch inventory so POS stays sellable even if catalog lookup fails.
+  // Fetch medicines directly from branch inventory when selectedBranchId changes
   useEffect(() => {
     const controller = new AbortController();
     void loadAvailableMedicines(controller.signal);
 
     return () => controller.abort();
-  }, []);
+  }, [selectedBranchId]);
+
+  // Load branches if user is Admin/Chain Manager
+  const isAdminOrChainManager = user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER';
+  useEffect(() => {
+    if (!isAdminOrChainManager) return;
+
+    const fetchBranches = async () => {
+      try {
+        const token = localStorage.getItem('pharmacy_token');
+        const response = await fetch('http://localhost:3000/api/branches', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setBranches(data);
+        }
+      } catch (err) {
+        console.error('Error fetching branches:', err);
+      }
+    };
+    void fetchBranches();
+  }, [isAdminOrChainManager]);
+
+  // Clear cart when branch changes to prevent inventory lot mismatch
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    setCart([]);
+    setCapturedImage(null);
+  }, [selectedBranchId]);
+
+  // Customer search with debounce
+  useEffect(() => {
+    if (!customerSearch || customerSearch.length < 2) {
+      setCustomerResults([]);
+      setShowCustomerDropdown(false);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      setIsCustomerSearching(true);
+      try {
+        const token = localStorage.getItem('pharmacy_token');
+        const response = await fetch(`http://localhost:3000/api/customers?search=${encodeURIComponent(customerSearch)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setCustomerResults(data);
+          setShowCustomerDropdown(data.length > 0);
+        }
+      } catch {
+        // silently fail — customer search is optional
+      } finally {
+        setIsCustomerSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [customerSearch]);
+
+  const handleSelectCustomer = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setCustomerSearch('');
+    setShowCustomerDropdown(false);
+    toast.success(`Đã liên kết khách hàng: ${customer.name} (${customer.membershipTier.toUpperCase()})`);
+  };
+
+  const handleClearCustomer = () => {
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    setCustomerResults([]);
+  };
 
   // Strategy Pattern States
   const [promoType, setPromoType] = useState<string>('default');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [rewardPoints, setRewardPoints] = useState(0);
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [giftWarning, setGiftWarning] = useState<{
+    giftMedId: string;
+    giftName: string;
+    eligibleQty: number;
+    currentQty: number;
+    missingQty: number;
+  } | null>(null);
+
+  // Load promotions on mount from database API or localStorage fallback
+  useEffect(() => {
+    const fetchPromotions = async () => {
+      try {
+        const token = localStorage.getItem('pharmacy_token');
+        const response = await fetch('http://localhost:3000/api/promotions', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setPromotions(data);
+            localStorage.setItem('pharmachain_promotions', JSON.stringify(data));
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching database promotions in POS:', err);
+      }
+
+      // Fallback
+      const stored = localStorage.getItem('pharmachain_promotions');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPromotions(parsed);
+            return;
+          }
+        } catch (err) {
+          console.error('Error parsing stored promotions in POS:', err);
+        }
+      }
+
+      // Default Seed Promotions
+      const defaultPromos = [
+        { id: 'default', code: 'default', name: 'VIP tích điểm thưởng mặc định', value: 0, status: 'active', type: 'default', targetBranch: 'all' },
+        { id: 'percent_10', code: 'percent_10', name: 'Chiết khấu 10% tổng hóa đơn', value: 10, status: 'active', type: 'percent', targetBranch: 'all' },
+        { id: 'fixed_20', code: 'fixed_20', name: 'Giảm thẳng $20 trực tiếp', value: 20, status: 'active', type: 'fixed', targetBranch: 'all' },
+        { id: 'combo_para', code: 'combo_para', name: 'Combo Paracetamol (Giảm thêm $5)', value: 5, status: 'active', type: 'combo', targetBranch: 'all' },
+        { id: 'vip_points', code: 'vip_points', name: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)', value: 2, status: 'active', type: 'loyalty', targetBranch: 'all' }
+      ];
+      setPromotions(defaultPromos);
+      localStorage.setItem('pharmachain_promotions', JSON.stringify(defaultPromos));
+    };
+
+    void fetchPromotions();
+  }, []);
 
   // Calculate prices using Strategy Pattern
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -364,29 +517,211 @@ export function POS() {
       customerTier,
     };
 
-    const calculator = new PromotionCalculator();
-    switch (promoType) {
-      case 'percent_10':
-        calculator.setStrategy(new PercentDiscountStrategy(10));
-        break;
-      case 'fixed_20':
-        calculator.setStrategy(new FixedAmountStrategy(20));
-        break;
-      case 'combo_para':
-        // med-1 corresponds to Paracetamol 500mg
-        calculator.setStrategy(new ComboStrategy('med-1', 5));
-        break;
-      case 'vip_points':
-        calculator.setStrategy(new PointRewardStrategy());
-        break;
-      default:
-        calculator.setStrategy(new DefaultStrategy());
-        break;
+    let discount = 0;
+    let points = Math.floor(subtotal / 10); // default points
+
+    let dbPromoApplied = false;
+    if (promoType && promoType !== 'default') {
+      const promotion = promotions.find(p => p.id === promoType);
+      if (promotion && promotion.status === 'active') {
+        try {
+          const config = promotion.config ? (typeof promotion.config === 'string' ? JSON.parse(promotion.config) : promotion.config) : {};
+          dbPromoApplied = true;
+
+          switch (promotion.type) {
+            case 'percent_discount':
+            case 'percent': {
+              const minOrder = Number(config.minOrderValue || 0);
+              const pct = Number(promotion.value || config.percent || 0);
+              if (subtotal >= minOrder) {
+                discount = subtotal * (pct / 100);
+              }
+              break;
+            }
+            case 'fixed_discount':
+            case 'fixed': {
+              const minOrder = Number(config.minOrderValue || 0);
+              const amt = Number(promotion.value || config.amount || 0);
+              if (subtotal >= minOrder) {
+                discount = Math.min(amt, subtotal);
+              }
+              break;
+            }
+            case 'buy_gift':
+            case 'combo': {
+              const buyMedId = config.buyMedicineId;
+              const giftMedId = config.giftMedicineId;
+              const buyQty = Number(config.buyQuantity || 1);
+              const giftQty = Number(config.giftQuantity || 1);
+              const buyUnit = config.buyUnit;
+              const giftUnit = config.giftUnit;
+
+              if (buyMedId && giftMedId) {
+                const buyMed = medicines.find(m => m.id === buyMedId);
+                const buyUnitOpt = buyMed?.sellUnits?.find(u => u.value === buyUnit);
+                const buyFactor = buyUnitOpt ? buyUnitOpt.factorToBase : 1;
+
+                const buyItems = cart.filter(i => i.medicineId === buyMedId);
+                const totalBuyBaseQty = buyItems.reduce((sum, i) => sum + i.quantity * (i.conversionFactor || 1), 0);
+                const purchasedBuyQty = totalBuyBaseQty / buyFactor;
+
+                if (purchasedBuyQty >= buyQty) {
+                  const timesQualified = Math.floor(purchasedBuyQty / buyQty);
+                  const giftMed = medicines.find(m => m.id === giftMedId);
+                  const giftUnitOpt = giftMed?.sellUnits?.find(u => u.value === giftUnit);
+                  const giftFactor = giftUnitOpt ? giftUnitOpt.factorToBase : 1;
+                  const totalQualifiedGiftBaseQty = timesQualified * giftQty * giftFactor;
+
+                  let remainingGiftBaseQtyToDiscount = totalQualifiedGiftBaseQty;
+                  let comboDiscount = 0;
+                  const giftItemsInCart = cart.filter(i => i.medicineId === giftMedId);
+                  
+                  for (const item of giftItemsInCart) {
+                    if (remainingGiftBaseQtyToDiscount <= 0) break;
+                    const itemBaseQty = item.quantity * (item.conversionFactor || 1);
+                    const discountBaseQty = Math.min(itemBaseQty, remainingGiftBaseQtyToDiscount);
+                    const itemBasePrice = item.price / (item.conversionFactor || 1);
+                    comboDiscount += discountBaseQty * itemBasePrice;
+                    remainingGiftBaseQtyToDiscount -= discountBaseQty;
+                  }
+                  discount = comboDiscount;
+                }
+              }
+              break;
+            }
+            case 'loyalty_points':
+            case 'loyalty': {
+              let multiplier = 1.0;
+              const silverMult = Number(config.silverMultiplier ?? 1.2);
+              const goldMult = Number(config.goldMultiplier ?? 1.5);
+              const platMult = Number(config.platinumMultiplier ?? 2.0);
+
+              if (customerTier === 'silver') multiplier = silverMult;
+              if (customerTier === 'gold') multiplier = goldMult;
+              if (customerTier === 'platinum') multiplier = platMult;
+
+              const finalTotal = Math.max(0, subtotal - discount);
+              const basePoints = Math.floor(finalTotal / 10);
+              points = Math.floor(basePoints * multiplier);
+              break;
+            }
+            case 'category_voucher': {
+              const catId = config.categoryId;
+              const discType = config.discountType || 'percent';
+              const discVal = Number(config.discountValue || promotion.value || 0);
+
+              if (catId) {
+                const catSubtotal = cart
+                  .filter(item => {
+                    const matchMed = medicines.find(m => m.id === item.medicineId);
+                    return matchMed && matchMed.categoryId === catId;
+                  })
+                  .reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+                if (catSubtotal > 0) {
+                  if (discType === 'percent') {
+                    discount = catSubtotal * (discVal / 100);
+                  } else {
+                    discount = Math.min(discVal, catSubtotal);
+                  }
+                }
+              }
+              break;
+            }
+            default:
+              dbPromoApplied = false;
+              break;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
     }
 
-    setDiscountAmount(calculator.calculateDiscount(orderData));
-    setRewardPoints(calculator.calculatePoints(orderData));
-  }, [subtotal, cart, promoType, customerTier]);
+    if (!dbPromoApplied) {
+      // Fallback Strategy pattern
+      const getPromoValue = (promoId: string, defaultVal: number) => {
+        const match = promotions.find(p => p.id === promoId);
+        return (match && match.value !== undefined) ? match.value : defaultVal;
+      };
+
+      const calculator = new PromotionCalculator();
+      switch (promoType) {
+        case 'percent_10':
+          calculator.setStrategy(new PercentDiscountStrategy(getPromoValue('percent_10', 10)));
+          break;
+        case 'fixed_20':
+          calculator.setStrategy(new FixedAmountStrategy(getPromoValue('fixed_20', 20)));
+          break;
+        case 'combo_para':
+          calculator.setStrategy(new ComboStrategy('med-1', getPromoValue('combo_para', 5)));
+          break;
+        case 'vip_points':
+          calculator.setStrategy(new PointRewardStrategy());
+          break;
+        default:
+          calculator.setStrategy(new DefaultStrategy());
+          break;
+      }
+      discount = calculator.calculateDiscount(orderData);
+      points = calculator.calculatePoints(orderData);
+    }
+
+    setDiscountAmount(discount);
+    setRewardPoints(points);
+
+    // Calculate eligible gift warnings for buy_gift / combo rules
+    let giftWarn: any = null;
+    if (promoType && promoType !== 'default') {
+      const promotion = promotions.find(p => p.id === promoType);
+      if (promotion && promotion.status === 'active') {
+        const config = promotion.config ? (typeof promotion.config === 'string' ? JSON.parse(promotion.config) : promotion.config) : {};
+        if (promotion.type === 'buy_gift' || promotion.type === 'combo') {
+          const buyMedId = config.buyMedicineId;
+          const giftMedId = config.giftMedicineId;
+          const buyQty = Number(config.buyQuantity || 1);
+          const giftQty = Number(config.giftQuantity || 1);
+          const buyUnit = config.buyUnit;
+          const giftUnit = config.giftUnit;
+
+          if (buyMedId && giftMedId) {
+            const buyMed = medicines.find(m => m.id === buyMedId);
+            const buyUnitOpt = buyMed?.sellUnits?.find(u => u.value === buyUnit);
+            const buyFactor = buyUnitOpt ? buyUnitOpt.factorToBase : 1;
+
+            const buyItems = cart.filter(i => i.medicineId === buyMedId);
+            const totalBuyBaseQty = buyItems.reduce((sum, i) => sum + i.quantity * (i.conversionFactor || 1), 0);
+            const purchasedBuyQty = totalBuyBaseQty / buyFactor;
+
+            if (purchasedBuyQty >= buyQty) {
+              const timesQualified = Math.floor(purchasedBuyQty / buyQty);
+              const giftMed = medicines.find(m => m.id === giftMedId);
+              const giftUnitOpt = giftMed?.sellUnits?.find(u => u.value === giftUnit);
+              const giftFactor = giftUnitOpt ? giftUnitOpt.factorToBase : 1;
+              const eligibleGiftQty = timesQualified * giftQty;
+              const eligibleGiftBaseQty = eligibleGiftQty * giftFactor;
+
+              const giftItems = cart.filter(i => i.medicineId === giftMedId);
+              const currentGiftBaseQty = giftItems.reduce((sum, i) => sum + i.quantity * (i.conversionFactor || 1), 0);
+              
+              if (currentGiftBaseQty < eligibleGiftBaseQty) {
+                const giftName = giftMed ? giftMed.name : 'Sản phẩm quà tặng';
+                giftWarn = {
+                  giftMedId,
+                  giftName,
+                  giftUnit,
+                  eligibleQty: eligibleGiftQty,
+                  currentQty: currentGiftBaseQty / giftFactor,
+                  missingQty: (eligibleGiftBaseQty - currentGiftBaseQty) / giftFactor,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+    setGiftWarning(giftWarn);
+  }, [subtotal, cart, promoType, customerTier, promotions, medicines]);
 
   const addToCart = (medicine: AvailableMedicine, explicitUnit?: string) => {
     const sellUnit = medicine.sellUnits.find(
@@ -464,6 +799,72 @@ export function POS() {
     }
     setPendingMedicine(null);
     toast.success(`Đã thêm ${medicine.name} theo ${sellUnit.label} vào giỏ hàng`);
+  };
+
+  const addGiftToCart = (giftMedId: string, quantityToAdd: number, explicitUnit?: string) => {
+    const medicine = medicines.find(m => m.id === giftMedId);
+    if (!medicine) {
+      toast.error('Không tìm thấy thông tin sản phẩm quà tặng!');
+      return;
+    }
+    
+    // Choose default or selected sell unit
+    const sellUnit = medicine.sellUnits.find(
+      (option) => option.value === (explicitUnit || selectedSellUnits[medicine.id] || medicine.defaultSellUnit)
+    );
+    if (!sellUnit) {
+      toast.error('Không tìm thấy đơn vị bán cho sản phẩm quà tặng.');
+      return;
+    }
+
+    const baseQtyToAdd = quantityToAdd * sellUnit.factorToBase;
+    const nextBaseQuantity = getTotalBaseQuantityInCart(medicine.id) + baseQtyToAdd;
+    if (nextBaseQuantity > medicine.stock) {
+      toast.error(`Tồn kho ${medicine.name} không đủ để thêm ${quantityToAdd} quà tặng.`);
+      return;
+    }
+
+    const existingItem = cart.find(
+      (item) => item.medicineId === medicine.id && item.selectedUnit === sellUnit.value
+    );
+
+    if (existingItem) {
+      setCart(
+        cart.map((item) =>
+          item.id === existingItem.id
+            ? {
+                ...item,
+                quantity: item.quantity + quantityToAdd,
+                baseQuantity: (item.quantity + quantityToAdd) * sellUnit.factorToBase,
+                total: (item.quantity + quantityToAdd) * item.price,
+              }
+            : item
+        )
+      );
+    } else {
+      setCart([
+        ...cart,
+        {
+          id: `cart-${Date.now()}`,
+          medicineId: medicine.id,
+          name: medicine.name,
+          price: sellUnit.price,
+          quantity: quantityToAdd,
+          selectedUnit: sellUnit.value,
+          baseUnit: medicine.baseUnit,
+          conversionFactor: sellUnit.factorToBase,
+          baseQuantity: baseQtyToAdd,
+          baseUnitPrice: medicine.baseUnitPrice,
+          discount: 0,
+          total: sellUnit.price * quantityToAdd,
+          isPrescriptionRequired: medicine.isPrescriptionRequired,
+          prescriptionId: medicine.isPrescriptionRequired ? prescriptionId || 'TOA-POS-REALTIME' : undefined,
+          lotNumber: medicine.lotNumber || 'LOT001',
+        },
+      ]);
+    }
+
+    toast.success(`Đã tự động thêm ${quantityToAdd} ${medicine.name} (quà tặng) vào giỏ hàng!`);
   };
 
   const addToCartWithImage = (medicine: AvailableMedicine, imgData: string) => {
@@ -703,6 +1104,12 @@ export function POS() {
   };
 
   const handleCheckout = async () => {
+    const isAdminOrChainManager = user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER';
+    if (isAdminOrChainManager && !selectedBranchId) {
+      toast.error('Vui lòng chọn chi nhánh đang đứng bán trước khi thanh toán!');
+      return;
+    }
+
     if (cart.length === 0) {
       toast.error('Giỏ hàng trống');
       return;
@@ -728,12 +1135,14 @@ export function POS() {
         },
         body: JSON.stringify({
           cart,
-          customerId: customerId || 'Khách vãng lai',
+          customerId: selectedCustomer?.id || 'Khách vãng lai',
           customerTier,
           promoType,
+          promoValue: promotions.find((p) => p.id === promoType)?.value,
           paymentMethod,
           prescriptionId: prescriptionId || `TOA-${Date.now().toString().slice(-6)}`,
-          capturedImage
+          capturedImage,
+          branchId: selectedBranchId || undefined,
         })
       });
 
@@ -749,7 +1158,8 @@ export function POS() {
       // Reset state
       setCart([]);
       setBarcode('');
-      setCustomerId('');
+      setSelectedCustomer(null);
+      setCustomerSearch('');
       setPrescriptionId('');
       setCapturedImage(null);
       setPromoType('default');
@@ -782,6 +1192,48 @@ export function POS() {
   return (
     <div>
       <Header title="Bán lẻ tại quầy (POS)" subtitle="Giao diện bán thuốc nhanh tích hợp an toàn dược lâm sàng" />
+
+      {/* Sleek Branch Selection Toolbar */}
+      <div className="px-6 pt-6">
+        <div className="p-4 bg-card/65 backdrop-blur-md border border-border/80 rounded-xl shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 text-primary rounded-lg">
+              <Store className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm">Điểm bán hàng lẻ (POS Endpoint)</h3>
+              <p className="text-xs text-muted-foreground">
+                Tài khoản: <strong className="text-foreground">{user?.name}</strong> ({user?.role === 'ROLE_ADMIN' ? 'Quản trị viên' : user?.role === 'ROLE_CHAIN_MANAGER' ? 'Quản lý chuỗi' : 'Nhân viên chi nhánh'})
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-auto">
+            {isAdminOrChainManager ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Đang đứng bán tại:</span>
+                <select
+                  value={selectedBranchId}
+                  onChange={(e) => setSelectedBranchId(e.target.value)}
+                  className="px-3 py-1.5 bg-background border border-input rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer min-w-[200px] shadow-sm"
+                >
+                  <option value="">-- Chọn Chi Nhánh --</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.code.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-primary/5 border border-primary/25 px-3 py-1.5 rounded-lg text-xs font-semibold text-primary">
+                <span className="w-1.5 h-1.5 bg-success rounded-full animate-pulse"></span>
+                <span>Chi nhánh hoạt động: {user?.branchName || 'Đang tải...'}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -921,129 +1373,156 @@ export function POS() {
               </div>
             )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Tìm kiếm sản phẩm nhanh</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Quét mã vạch thuốc hoặc gõ tìm kiếm..."
-                      value={barcode}
-                      onChange={(e) => setBarcode(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleBarcodeSearch()}
-                      className="pl-10"
-                    />
-                  </div>
-                  <Button onClick={handleBarcodeSearch}>Tìm kiếm</Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-3">
-                  <span>Thuốc bán chạy phổ biến</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void loadAvailableMedicines()}
-                    disabled={isMedicinesLoading}
+            {isAdminOrChainManager && !selectedBranchId ? (
+              <Card className="border-dashed border-2 border-primary/30 flex flex-col items-center justify-center p-12 text-center bg-card/40 backdrop-blur-md min-h-[400px]">
+                <Store className="h-16 w-16 text-primary/40 mb-4 animate-bounce" />
+                <h3 className="text-lg font-semibold text-primary">Vui lòng chọn Chi nhánh bán hàng</h3>
+                <p className="text-sm text-muted-foreground max-w-sm mt-2 leading-relaxed">
+                  Vì bạn đang đăng nhập dưới quyền quản trị viên cấp cao (**{user?.role === 'ROLE_ADMIN' ? 'Quản trị viên' : 'Quản lý chuỗi'}**), hệ thống yêu cầu xác định chi nhánh đứng quầy để đối soát chính xác tồn kho thực tế.
+                </p>
+                <div className="mt-6 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-muted-foreground">Đang đứng bán tại:</span>
+                  <select
+                    value={selectedBranchId}
+                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    className="px-3 py-2 bg-background border border-input rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer min-w-[220px] shadow-sm"
                   >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isMedicinesLoading ? 'animate-spin' : ''}`} />
-                    Tải lại tồn kho
-                  </Button>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isMedicinesLoading ? (
-                  <div className="h-36 border border-dashed border-border rounded-lg flex flex-col items-center justify-center text-center p-4">
-                    <RefreshCw className="h-6 w-6 animate-spin text-primary mb-3" />
-                    <p className="font-medium">Đang tải tồn kho bán hàng...</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Hệ thống đang lấy thuốc còn hàng của chi nhánh hiện tại.
-                    </p>
-                  </div>
-                ) : medicinesError ? (
-                  <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 text-amber-900 space-y-3">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold">Không tải được danh sách thuốc để bán</p>
-                        <p className="text-sm mt-1">{medicinesError}</p>
+                    <option value="">-- Chọn Chi Nhánh --</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.code.toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Card>
+            ) : (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Tìm kiếm sản phẩm nhanh</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Quét mã vạch thuốc hoặc gõ tìm kiếm..."
+                          value={barcode}
+                          onChange={(e) => setBarcode(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && handleBarcodeSearch()}
+                          className="pl-10"
+                        />
                       </div>
+                      <Button onClick={handleBarcodeSearch}>Tìm kiếm</Button>
                     </div>
-                    <Button size="sm" onClick={() => void loadAvailableMedicines()}>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Thử tải lại
-                    </Button>
-                  </div>
-                ) : medicines.length === 0 ? (
-                  <div className="h-36 border border-dashed border-border rounded-lg flex items-center justify-center text-muted-foreground text-center p-4">
-                    Không có thuốc nào còn tồn kho để bán tại chi nhánh này.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {medicines.map((medicine) => {
-                      const selectedUnit = getSelectedSellUnit(medicine);
+                  </CardContent>
+                </Card>
 
-                      return (
-                        <div
-                          key={medicine.id}
-                          className="p-4 border border-border rounded-lg bg-card text-left flex flex-col justify-between min-h-48"
-                        >
-                          <div className="space-y-2">
-                            <div className="text-[11px] font-mono text-muted-foreground">{medicine.code}</div>
-                            <div className="flex items-start justify-between gap-2 w-full">
-                              <p className="font-semibold text-sm line-clamp-2">{medicine.name}</p>
-                              {medicine.isPrescriptionRequired && (
-                                <Badge variant="warning" className="ml-2 shrink-0">Rx</Badge>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {medicine.isColdChain && <Badge variant="info">Lạnh</Badge>}
-                              {medicine.isSpecialControl && <Badge variant="danger">KSDB</Badge>}
-                            </div>
-                            <Select
-                              value={selectedUnit?.value || medicine.defaultSellUnit}
-                              onChange={(e) =>
-                                setSelectedSellUnits((prev) => ({
-                                  ...prev,
-                                  [medicine.id]: e.target.value,
-                                }))
-                              }
-                              options={medicine.sellUnits.map((option) => ({
-                                value: option.value,
-                                label: option.label,
-                              }))}
-                            />
-                          </div>
-                          <div className="mt-4 space-y-2">
-                            <p className="text-xl font-bold">${selectedUnit?.price.toFixed(2)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Tồn nguyên gói: {selectedUnit?.maxWholeUnits || 0} {selectedUnit?.label || ''}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Tồn cơ sở: {medicine.stock} {getUnitLabel(medicine.baseUnit)}
-                            </p>
-                            <Button
-                              type="button"
-                              className="w-full"
-                              onClick={() => addToCart(medicine, selectedUnit?.value)}
-                              disabled={!selectedUnit || selectedUnit.maxWholeUnits < 1}
-                            >
-                              Thêm 1 {selectedUnit?.label || ''}
-                            </Button>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between gap-3">
+                      <span>Thuốc bán chạy phổ biến</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void loadAvailableMedicines()}
+                        disabled={isMedicinesLoading}
+                      >
+                        <RefreshCw className={`h-4 w-4 mr-2 ${isMedicinesLoading ? 'animate-spin' : ''}`} />
+                        Tải lại tồn kho
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isMedicinesLoading ? (
+                      <div className="h-36 border border-dashed border-border rounded-lg flex flex-col items-center justify-center text-center p-4">
+                        <RefreshCw className="h-6 w-6 animate-spin text-primary mb-3" />
+                        <p className="font-medium">Đang tải tồn kho bán hàng...</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Hệ thống đang lấy thuốc còn hàng của chi nhánh hiện tại.
+                        </p>
+                      </div>
+                    ) : medicinesError ? (
+                      <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 text-amber-900 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-semibold">Không tải được danh sách thuốc để bán</p>
+                            <p className="text-sm mt-1">{medicinesError}</p>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                        <Button size="sm" onClick={() => void loadAvailableMedicines()}>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Thử tải lại
+                        </Button>
+                      </div>
+                    ) : medicines.length === 0 ? (
+                      <div className="h-36 border border-dashed border-border rounded-lg flex items-center justify-center text-muted-foreground text-center p-4">
+                        Không có thuốc nào còn tồn kho để bán tại chi nhánh này.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {medicines.map((medicine) => {
+                          const selectedUnit = getSelectedSellUnit(medicine);
+
+                          return (
+                            <div
+                              key={medicine.id}
+                              className="p-4 border border-border rounded-lg bg-card text-left flex flex-col justify-between min-h-48"
+                            >
+                              <div className="space-y-2">
+                                <div className="text-[11px] font-mono text-muted-foreground">{medicine.code}</div>
+                                <div className="flex items-start justify-between gap-2 w-full">
+                                  <p className="font-semibold text-sm line-clamp-2">{medicine.name}</p>
+                                  {medicine.isPrescriptionRequired && (
+                                    <Badge variant="warning" className="ml-2 shrink-0">Rx</Badge>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {medicine.isColdChain && <Badge variant="info">Lạnh</Badge>}
+                                  {medicine.isSpecialControl && <Badge variant="danger">KSDB</Badge>}
+                                </div>
+                                <Select
+                                  value={selectedUnit?.value || medicine.defaultSellUnit}
+                                  onChange={(e) =>
+                                    setSelectedSellUnits((prev) => ({
+                                      ...prev,
+                                      [medicine.id]: e.target.value,
+                                    }))
+                                  }
+                                  options={medicine.sellUnits.map((option) => ({
+                                    value: option.value,
+                                    label: option.label,
+                                  }))}
+                                />
+                              </div>
+                              <div className="mt-4 space-y-2">
+                                <p className="text-xl font-bold">${selectedUnit?.price.toFixed(2)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Tồn nguyên gói: {selectedUnit?.maxWholeUnits || 0} {selectedUnit?.label || ''}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Tồn cơ sở: {medicine.stock} {getUnitLabel(medicine.baseUnit)}
+                                </p>
+                                <Button
+                                  type="button"
+                                  className="w-full"
+                                  onClick={() => addToCart(medicine, selectedUnit?.value)}
+                                  disabled={!selectedUnit || selectedUnit.maxWholeUnits < 1}
+                                >
+                                  Thêm 1 {selectedUnit?.label || ''}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
 
           {/* Right: Cart and Checkout with Strategy selection */}
@@ -1186,24 +1665,96 @@ export function POS() {
                 <CardTitle>Cấu hình hóa đơn & Khuyến mãi</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    label="Khách hàng"
-                    placeholder="Mã liên kết"
-                    value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                  />
-                  <Select
-                    label="Hạng VIP"
-                    value={customerTier}
-                    onChange={(e) => setCustomerTier(e.target.value as any)}
-                    options={[
-                      { value: 'normal', label: 'Vãng lai' },
-                      { value: 'silver', label: 'Bạc' },
-                      { value: 'gold', label: 'Vàng' },
-                      { value: 'platinum', label: 'Bạch kim' },
-                    ]}
-                  />
+                {/* Customer Search & Select */}
+                <div>
+                  <label className="text-sm font-medium block mb-1.5">
+                    <Users className="inline h-4 w-4 mr-1.5 text-muted-foreground" />
+                    Khách hàng
+                  </label>
+                  {selectedCustomer ? (
+                    <div className="flex items-center gap-2 p-2.5 bg-primary/5 border border-primary/20 rounded-lg">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{selectedCustomer.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-muted-foreground font-mono">{selectedCustomer.code}</span>
+                          <span className="text-xs text-muted-foreground">•</span>
+                          <span className="text-xs text-muted-foreground">{selectedCustomer.phone}</span>
+                          <Badge variant={
+                            selectedCustomer.membershipTier === 'platinum' ? 'success' :
+                            selectedCustomer.membershipTier === 'gold' ? 'warning' :
+                            selectedCustomer.membershipTier === 'silver' ? 'info' : 'default'
+                          } className="text-[10px]">
+                            {selectedCustomer.membershipTier.toUpperCase()}
+                          </Badge>
+                          <span className="text-xs font-medium text-yellow-600 dark:text-yellow-400">
+                            {selectedCustomer.points.toLocaleString()} điểm
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleClearCustomer}
+                        className="shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        type="text"
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
+                        onFocus={() => customerResults.length > 0 && setShowCustomerDropdown(true)}
+                        placeholder="Tìm SĐT, tên hoặc mã KH..."
+                        className="w-full text-sm pl-8 pr-9 py-2 bg-background border border-input rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                      {isCustomerSearching && (
+                        <RefreshCw className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                      )}
+
+                      {showCustomerDropdown && (
+                        <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          {customerResults.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => handleSelectCustomer(c)}
+                              className="w-full text-left px-3 py-2 hover:bg-accent/50 flex items-center justify-between gap-2 border-b border-border/40 last:border-b-0"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{c.name}</p>
+                                <p className="text-xs text-muted-foreground">{c.phone} • {c.code}</p>
+                              </div>
+                              <Badge variant={
+                                c.membershipTier === 'platinum' ? 'success' :
+                                c.membershipTier === 'gold' ? 'warning' :
+                                c.membershipTier === 'silver' ? 'info' : 'default'
+                              } className="text-[10px] shrink-0">
+                                {c.membershipTier.toUpperCase()}
+                              </Badge>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!selectedCustomer && (
+                    <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+                      <span>Bỏ trống = Khách vãng lai</span>
+                      <span className="text-border">|</span>
+                      <a
+                        href="/customers/new"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        <UserPlus className="h-3 w-3" /> Đăng ký mới
+                      </a>
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1230,14 +1781,66 @@ export function POS() {
                   label="Chương trình Khuyến mãi (Strategy Pattern)"
                   value={promoType}
                   onChange={(e) => setPromoType(e.target.value)}
-                  options={[
-                    { value: 'default', label: 'VIP tích điểm thưởng mặc định' },
-                    { value: 'percent_10', label: 'Chiết khấu 10% tổng hóa đơn' },
-                    { value: 'fixed_20', label: 'Giảm thẳng $20 trực tiếp' },
-                    { value: 'combo_para', label: 'Combo Paracetamol (Giảm thêm $5)' },
-                    { value: 'vip_points', label: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)' },
-                  ]}
+                  options={promotions.length > 0
+                    ? promotions
+                        .filter((p) => {
+                          if (p.status !== 'active') return false;
+                          if (p.targetBranch && p.targetBranch !== 'all' && p.targetBranch !== selectedBranchId) return false;
+                          
+                          // Date range validations
+                          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+                          if (p.startDate && todayStr < p.startDate) return false;
+                          if (p.endDate && todayStr > p.endDate) return false;
+                          
+                          // Target group tier validations
+                          if (p.targetGroup && p.targetGroup !== 'all') {
+                            const allowedTiers = p.targetGroup.split(',').map((t: string) => t.trim().toLowerCase());
+                            if (!allowedTiers.includes(customerTier.toLowerCase())) return false;
+                          }
+                          
+                          return true;
+                        })
+                        .map((p) => ({
+                          value: p.id,
+                          label: p.id === 'default'
+                            ? p.name
+                            : p.type === 'percent' || p.type === 'percent_discount'
+                            ? `${p.name} (${p.value}%)`
+                            : p.type === 'fixed' || p.type === 'fixed_discount' || p.type === 'combo' || p.type === 'buy_gift' || p.type === 'category_voucher'
+                            ? `${p.name} ($${p.value})`
+                            : p.name
+                        }))
+                    : [
+                        { value: 'default', label: 'VIP tích điểm thưởng mặc định' },
+                        { value: 'percent_10', label: 'Chiết khấu 10% tổng hóa đơn' },
+                        { value: 'fixed_20', label: 'Giảm thẳng $20 trực tiếp' },
+                        { value: 'combo_para', label: 'Combo Paracetamol (Giảm thêm $5)' },
+                        { value: 'vip_points', label: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)' },
+                      ]
+                  }
                 />
+
+                {/* Hộp thông báo quà tặng khuyến mãi nếu đủ điều kiện */}
+                {giftWarning && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/35 rounded-lg text-amber-700 dark:text-amber-300 text-xs font-semibold space-y-1.5 animate-pulse">
+                    <p className="flex items-center gap-1.5">
+                      <Gift className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                      <span>
+                        Đơn hàng đủ điều kiện nhận quà: <strong>{giftWarning.eligibleQty} {giftWarning.giftUnit ? getUnitLabel(giftWarning.giftUnit) : ''} {giftWarning.giftName}</strong>!
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      (Hiện có {giftWarning.currentQty} trong giỏ, thiếu {giftWarning.missingQty})
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => addGiftToCart(giftWarning.giftMedId, giftWarning.missingQty, giftWarning.giftUnit)}
+                      className="w-full text-center py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-bold transition-all shadow-sm flex items-center justify-center gap-1 mt-1 cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" /> Nhận tự động {giftWarning.missingQty} {giftWarning.giftUnit ? getUnitLabel(giftWarning.giftUnit) : 'sản phẩm'} quà tặng
+                    </button>
+                  </div>
+                )}
 
                 {/* Prescription photo capturing actions */}
                 {cart.some((item) => item.isPrescriptionRequired) && (

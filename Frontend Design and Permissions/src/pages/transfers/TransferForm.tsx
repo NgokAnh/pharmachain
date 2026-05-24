@@ -56,6 +56,7 @@ export function TransferForm() {
   const [submitting, setSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
+    fromBranchId: user?.branchId || '',
     toBranchId: '',
     notes: '',
   });
@@ -75,7 +76,6 @@ export function TransferForm() {
       });
       if (res.ok) {
         const data = await res.json();
-        // Exclude user's own branch from "to" options
         setBranches(data.map((b: any) => ({ id: b.id, name: b.name })));
       }
     } catch {
@@ -85,12 +85,12 @@ export function TransferForm() {
     }
   }, []);
 
-  const loadMedicines = useCallback(async () => {
-    if (!user?.branchId) return;
+  const loadMedicines = useCallback(async (targetBranchId: string) => {
+    if (!targetBranchId) return;
     setLoadingMedicines(true);
     try {
       // Load inventory lots for this branch
-      const res = await fetch(`${API_BASE}/branches/${user.branchId}`, {
+      const res = await fetch(`${API_BASE}/branches/${targetBranchId}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error();
@@ -109,34 +109,14 @@ export function TransferForm() {
             lots: [],
           };
         }
-        // Calculate net quantity from transactions if available, otherwise use a placeholder
+        // Use actual net quantity from branch API
         medMap[lot.medicineId].lots.push({
           id: lot.id,
           lotNumber: lot.lotNumber,
           expiryDate: lot.expiryDate,
-          quantity: 999, // Will be replaced by actual quantity from transactions
+          quantity: lot.quantity || 0,
           status: lot.status,
         });
-      }
-
-      // Fetch actual quantities via medicines API
-      const medsRes = await fetch(`${API_BASE}/medicines?branchId=${user.branchId}&pageSize=200`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (medsRes.ok) {
-        const medsData = await medsRes.json();
-        const items = medsData.data || medsData.items || medsData;
-        // Merge actual stock quantities
-        if (Array.isArray(items)) {
-          for (const item of items) {
-            if (medMap[item.id] && item.stockSummary) {
-              medMap[item.id].lots = medMap[item.id].lots.map((lot: any) => ({
-                ...lot,
-                quantity: item.stockSummary.available || 0,
-              }));
-            }
-          }
-        }
       }
 
       setMedicines(Object.values(medMap).filter((m) => m.lots.length > 0));
@@ -145,12 +125,17 @@ export function TransferForm() {
     } finally {
       setLoadingMedicines(false);
     }
-  }, [user?.branchId]);
+  }, []);
 
   useEffect(() => {
     loadBranches();
-    loadMedicines();
-  }, [loadBranches, loadMedicines]);
+  }, [loadBranches]);
+
+  useEffect(() => {
+    if (formData.fromBranchId) {
+      loadMedicines(formData.fromBranchId);
+    }
+  }, [formData.fromBranchId, loadMedicines]);
 
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -227,8 +212,8 @@ export function TransferForm() {
   const validate = () => {
     const newErrors: Record<string, string> = {};
     if (!formData.toBranchId) newErrors.toBranchId = 'Vui lòng chọn chi nhánh nhận';
-    if (!user?.branchId) newErrors.fromBranchId = 'Bạn chưa được gán chi nhánh';
-    if (user?.branchId === formData.toBranchId) newErrors.toBranchId = 'Chi nhánh nhận phải khác chi nhánh gửi';
+    if (!formData.fromBranchId) newErrors.fromBranchId = 'Vui lòng chọn chi nhánh xuất';
+    if (formData.fromBranchId === formData.toBranchId) newErrors.toBranchId = 'Chi nhánh nhận phải khác chi nhánh gửi';
     if (items.length === 0) newErrors.items = 'Vui lòng thêm ít nhất 1 sản phẩm';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -250,6 +235,7 @@ export function TransferForm() {
           Authorization: `Bearer ${getToken()}`,
         },
         body: JSON.stringify({
+          fromBranchId: formData.fromBranchId,
           toBranchId: formData.toBranchId,
           notes: formData.notes,
           items: items.map((i) => ({
@@ -276,7 +262,8 @@ export function TransferForm() {
     }
   };
 
-  const availableToBranches = branches.filter((b) => b.id !== user?.branchId);
+  const availableToBranches = branches.filter((b) => b.id !== formData.fromBranchId);
+  const isAdminOrChainManager = user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER';
   const fromBranchName = branches.find((b) => b.id === user?.branchId)?.name || user?.branchId || 'N/A';
 
   return (
@@ -301,7 +288,7 @@ export function TransferForm() {
                 <CardTitle>Thông tin chuyển kho</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {user?.branchId && (
+                {user?.branchId && !isAdminOrChainManager && (
                   <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-blue-800 dark:text-blue-300">
                       Bạn đang tạo phiếu chuyển từ chi nhánh: <strong>{fromBranchName}</strong>
@@ -310,22 +297,44 @@ export function TransferForm() {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium">Từ chi nhánh</label>
-                    <Input value={fromBranchName} disabled className="mt-1" />
-                  </div>
+                  {isAdminOrChainManager ? (
+                    <Select
+                      label="Từ chi nhánh (Xuất) *"
+                      value={formData.fromBranchId}
+                      onChange={(e) => handleChange('fromBranchId', e.target.value)}
+                      options={
+                        loadingBranches
+                          ? [{ value: '', label: 'Đang tải...' }]
+                          : [
+                              { value: '', label: 'Chọn chi nhánh xuất...' },
+                              ...branches.map((b) => ({ value: b.id, label: b.name }))
+                            ]
+                      }
+                      error={errors.fromBranchId}
+                      required
+                      disabled={loadingBranches || items.length > 0}
+                    />
+                  ) : (
+                    <div>
+                      <label className="text-sm font-medium">Từ chi nhánh</label>
+                      <Input value={fromBranchName} disabled className="mt-1" />
+                    </div>
+                  )}
                   <Select
-                    label="Đến chi nhánh *"
+                    label="Đến chi nhánh (Nhận) *"
                     value={formData.toBranchId}
                     onChange={(e) => handleChange('toBranchId', e.target.value)}
                     options={
                       loadingBranches
                         ? [{ value: '', label: 'Đang tải...' }]
-                        : availableToBranches.map((b) => ({ value: b.id, label: b.name }))
+                        : [
+                            { value: '', label: 'Chọn chi nhánh nhận...' },
+                            ...availableToBranches.map((b) => ({ value: b.id, label: b.name }))
+                          ]
                     }
                     error={errors.toBranchId}
                     required
-                    disabled={loadingBranches || !user?.branchId}
+                    disabled={loadingBranches || !formData.fromBranchId}
                   />
                 </div>
 
@@ -350,7 +359,7 @@ export function TransferForm() {
                     type="button"
                     size="sm"
                     onClick={() => setShowAddItem(!showAddItem)}
-                    disabled={!user?.branchId || loadingMedicines}
+                    disabled={!formData.fromBranchId || loadingMedicines}
                   >
                     <Plus className="h-4 w-4 mr-2" />
                     {loadingMedicines ? 'Đang tải kho...' : 'Thêm sản phẩm'}
@@ -366,18 +375,22 @@ export function TransferForm() {
                         label="Thuốc"
                         value={selectedMedicine}
                         onChange={(e) => { setSelectedMedicine(e.target.value); setSelectedLot(''); }}
-                        options={medicines.length === 0
-                          ? [{ value: '', label: 'Không có tồn kho' }]
-                          : medicines.map((m) => ({ value: m.id, label: `${m.name} (${m.code})` }))}
+                        options={[
+                          { value: '', label: medicines.length === 0 ? 'Không có tồn kho' : 'Chọn thuốc...' },
+                          ...medicines.map((m) => ({ value: m.id, label: `${m.name} (${m.code})` }))
+                        ]}
                       />
                       <Select
                         label="Số lô"
                         value={selectedLot}
                         onChange={(e) => setSelectedLot(e.target.value)}
-                        options={availableLots.map((l) => ({
-                          value: l.lotNumber,
-                          label: `${l.lotNumber} | HSD: ${l.expiryDate}`,
-                        }))}
+                        options={[
+                          { value: '', label: 'Chọn số lô...' },
+                          ...availableLots.map((l) => ({
+                            value: l.lotNumber,
+                            label: `${l.lotNumber} | HSD: ${l.expiryDate}`,
+                          }))
+                        ]}
                         disabled={!selectedMedicine}
                       />
                       <Input

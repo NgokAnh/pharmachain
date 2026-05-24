@@ -7,6 +7,7 @@ import {
   Building2,
   ShoppingCart,
   Package,
+  PackageCheck,
   ArrowLeftRight,
   PackageOpen,
   CreditCard,
@@ -14,6 +15,7 @@ import {
   Receipt,
   Users,
   BarChart3,
+  Percent,
   Settings,
   FileSpreadsheet,
   LogOut,
@@ -66,6 +68,12 @@ const menuItems: MenuItem[] = [
     permissions: ['inventory.view'],
   },
   {
+    label: 'Kiểm kho',
+    icon: PackageCheck,
+    path: '/inventory/checks',
+    permissions: ['inventory.stocktake', 'inventory.adjust'],
+  },
+  {
     label: 'Chuyển kho',
     icon: ArrowLeftRight,
     path: '/transfers',
@@ -94,6 +102,12 @@ const menuItems: MenuItem[] = [
     icon: Users,
     path: '/customers',
     permissions: ['customer.view'],
+  },
+  {
+    label: 'Khuyến mãi',
+    icon: Percent,
+    path: '/promotions',
+    permissions: ['promotion.view'],
   },
   {
     label: 'Báo cáo',

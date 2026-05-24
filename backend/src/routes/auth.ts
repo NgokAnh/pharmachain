@@ -17,7 +17,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'sales.view', 'sales.create', 'sales.cancel',
     'prescription.verify', 'customer.view', 'customer.manage',
     'report.view_branch', 'report.view_chain', 'branch.manage',
-    'user.manage', 'role.manage', 'audit.view'
+    'user.manage', 'role.manage', 'audit.view', 'promotion.view', 'promotion.manage'
   ],
   ROLE_CHAIN_MANAGER: [
     'medicine.view', 'medicine.create', 'medicine.update', 'medicine.category.manage',
@@ -25,14 +25,15 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'purchasing.create', 'purchasing.approve', 'purchasing.receive',
     'inventory.view', 'inventory.stocktake', 'inventory.adjust', 'inventory.batch.manage',
     'transfer.create', 'transfer.approve', 'sales.view', 'sales.cancel',
-    'customer.view', 'customer.manage', 'report.view_branch', 'report.view_chain', 'audit.view'
+    'customer.view', 'customer.manage', 'report.view_branch', 'report.view_chain', 'audit.view',
+    'promotion.view', 'promotion.manage'
   ],
   ROLE_BRANCH_MANAGER: [
     'medicine.view', 'supplier.view', 'purchasing.create', 'purchasing.receive',
-    'inventory.view', 'inventory.stocktake', 'inventory.batch.manage',
+    'inventory.view', 'inventory.stocktake', 'inventory.adjust', 'inventory.batch.manage',
     'transfer.create', 'transfer.ship', 'transfer.receive',
     'sales.view', 'sales.create', 'sales.cancel',
-    'prescription.verify', 'customer.view', 'customer.manage', 'report.view_branch'
+    'prescription.verify', 'customer.view', 'customer.manage', 'report.view_branch', 'promotion.view'
   ],
   ROLE_PHARMACIST: [
     'medicine.view', 'inventory.view', 'sales.view', 'sales.create',

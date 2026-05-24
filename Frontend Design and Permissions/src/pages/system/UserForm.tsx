@@ -6,17 +6,14 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
-import { ArrowLeft, Save, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Save, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../../types';
 
-const branches = [
-  { id: 'br-1', name: 'Chi nhánh Quận 1' },
-  { id: 'br-2', name: 'Chi nhánh Quận 3' },
-  { id: 'br-3', name: 'Chi nhánh Hai Bà Trưng' },
-  { id: 'br-4', name: 'Chi nhánh Thanh Xuân' },
-  { id: 'br-5', name: 'Chi nhánh Cầu Giấy' },
-];
+interface BranchOption {
+  id: string;
+  name: string;
+}
 
 const roles: { value: UserRole; label: string; description: string }[] = [
   {
@@ -46,112 +43,81 @@ const roles: { value: UserRole; label: string; description: string }[] = [
   },
 ];
 
-// Mock data - giống với UserManagement
-const mockUsers = [
-  {
-    id: '1',
-    username: 'admin',
-    name: 'System Admin',
-    email: 'admin@pharmacy.com',
-    phone: '0901234567',
-    role: 'ROLE_ADMIN' as UserRole,
-    branchId: '',
-    branchName: '',
-    status: 'active',
-  },
-  {
-    id: '2',
-    username: 'chain_manager',
-    name: 'John Chain',
-    email: 'john@pharmacy.com',
-    phone: '0902345678',
-    role: 'ROLE_CHAIN_MANAGER' as UserRole,
-    branchId: '',
-    branchName: '',
-    status: 'active',
-  },
-  {
-    id: '3',
-    username: 'branch_manager',
-    name: 'Jane Branch',
-    email: 'jane@pharmacy.com',
-    phone: '0903456789',
-    role: 'ROLE_BRANCH_MANAGER' as UserRole,
-    branchId: 'br-1',
-    branchName: 'Downtown Branch',
-    status: 'active',
-  },
-  {
-    id: '4',
-    username: 'pharmacist',
-    name: 'Mary Pharmacist',
-    email: 'mary@pharmacy.com',
-    phone: '0904567890',
-    role: 'ROLE_PHARMACIST' as UserRole,
-    branchId: 'br-1',
-    branchName: 'Downtown Branch',
-    status: 'active',
-  },
-  {
-    id: '5',
-    username: 'warehouse',
-    name: 'Bob Warehouse',
-    email: 'bob@pharmacy.com',
-    phone: '0905678901',
-    role: 'ROLE_WAREHOUSE_STAFF' as UserRole,
-    branchId: 'br-1',
-    branchName: 'Downtown Branch',
-    status: 'inactive',
-  },
-];
-
 export function UserForm() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEdit = !!id;
 
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [formData, setFormData] = useState({
     username: '',
     password: '',
     confirmPassword: '',
     name: '',
     email: '',
-    phone: '',
     role: '' as UserRole | '',
     branchId: '',
-    status: 'active',
   });
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Load dữ liệu khi edit
+  // Load branches from API
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const token = localStorage.getItem('pharmacy_token');
+        const response = await fetch('http://localhost:3000/api/branches', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setBranches(data.map((b: any) => ({ id: b.id, name: b.name })));
+        }
+      } catch {
+        // Branches load is optional — the form still works
+      }
+    };
+    fetchBranches();
+  }, []);
+
+  // Load user data when editing
   useEffect(() => {
     if (isEdit && id) {
       setLoading(true);
-      // Giả lập API call
-      setTimeout(() => {
-        const user = mockUsers.find((u) => u.id === id);
-        if (user) {
+      const fetchUser = async () => {
+        try {
+          const token = localStorage.getItem('pharmacy_token');
+          const response = await fetch(`http://localhost:3000/api/users/${id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || 'Không tìm thấy người dùng');
+          }
+
+          const user = await response.json();
           setFormData({
             username: user.username,
             password: '',
             confirmPassword: '',
             name: user.name,
             email: user.email,
-            phone: user.phone || '',
             role: user.role,
             branchId: user.branchId || '',
-            status: user.status,
           });
-        } else {
-          toast.error('Không tìm thấy người dùng');
+        } catch (err: any) {
+          toast.error(err.message || 'Không thể tải thông tin người dùng');
           navigate('/system');
+        } finally {
+          setLoading(false);
         }
-        setLoading(false);
-      }, 500);
+      };
+      fetchUser();
     }
   }, [isEdit, id, navigate]);
 
@@ -195,6 +161,10 @@ export function UserForm() {
       } else if (formData.password !== formData.confirmPassword) {
         newErrors.confirmPassword = 'Mật khẩu xác nhận không khớp';
       }
+    } else if (formData.password && formData.password.length < 6) {
+      newErrors.password = 'Mật khẩu mới phải có ít nhất 6 ký tự';
+    } else if (formData.password && formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = 'Mật khẩu xác nhận không khớp';
     }
 
     if (!formData.name.trim()) newErrors.name = 'Vui lòng nhập họ tên';
@@ -203,10 +173,6 @@ export function UserForm() {
       newErrors.email = 'Vui lòng nhập email';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       newErrors.email = 'Email không hợp lệ';
-    }
-
-    if (formData.phone && !/^0\d{9}$/.test(formData.phone)) {
-      newErrors.phone = 'Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)';
     }
 
     if (!formData.role) {
@@ -221,7 +187,7 @@ export function UserForm() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validate()) {
@@ -229,9 +195,50 @@ export function UserForm() {
       return;
     }
 
-    const action = isEdit ? 'Cập nhật' : 'Thêm';
-    toast.success(`${action} người dùng thành công!`);
-    navigate('/system');
+    setSubmitting(true);
+    try {
+      const token = localStorage.getItem('pharmacy_token');
+      const url = isEdit
+        ? `http://localhost:3000/api/users/${id}`
+        : 'http://localhost:3000/api/users';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const body: any = {
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+        branchId: formData.branchId || '',
+      };
+
+      if (!isEdit) {
+        body.username = formData.username;
+        body.password = formData.password;
+      } else if (formData.password) {
+        body.password = formData.password;
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Thao tác thất bại');
+      }
+
+      const action = isEdit ? 'Cập nhật' : 'Tạo';
+      toast.success(`${action} tài khoản thành công!`);
+      navigate('/system');
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể lưu thông tin người dùng.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleCancel = () => {
@@ -247,11 +254,9 @@ export function UserForm() {
           title={isEdit ? 'Sửa người dùng' : 'Thêm người dùng'}
           subtitle={isEdit ? 'Cập nhật thông tin người dùng' : 'Tạo tài khoản người dùng mới'}
         />
-        <div className="p-6 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Đang tải dữ liệu...</p>
-          </div>
+        <div className="p-6 flex items-center justify-center py-20">
+          <RefreshCw className="h-6 w-6 animate-spin text-primary mr-3" />
+          <span className="text-muted-foreground">Đang tải dữ liệu...</span>
         </div>
       </div>
     );
@@ -288,64 +293,47 @@ export function UserForm() {
                     required
                     disabled={isEdit}
                   />
-                  <Select
-                    label="Trạng thái"
-                    value={formData.status}
-                    onChange={(e) => handleChange('status', e.target.value)}
-                    options={[
-                      { value: 'active', label: 'Hoạt động' },
-                      { value: 'inactive', label: 'Vô hiệu hóa' },
-                    ]}
-                    required
-                  />
+                  <div />
                 </div>
 
-                {!isEdit ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="relative">
-                      <Input
-                        label="Mật khẩu"
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Nhập mật khẩu"
-                        value={formData.password}
-                        onChange={(e) => handleChange('password', e.target.value)}
-                        error={errors.password}
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-9 text-muted-foreground hover:text-foreground"
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <Input
-                        label="Xác nhận mật khẩu"
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        placeholder="Nhập lại mật khẩu"
-                        value={formData.confirmPassword}
-                        onChange={(e) => handleChange('confirmPassword', e.target.value)}
-                        error={errors.confirmPassword}
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3 top-9 text-muted-foreground hover:text-foreground"
-                      >
-                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="relative">
+                    <Input
+                      label={isEdit ? 'Mật khẩu mới (để trống nếu không đổi)' : 'Mật khẩu'}
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={isEdit ? 'Nhập mật khẩu mới...' : 'Nhập mật khẩu'}
+                      value={formData.password}
+                      onChange={(e) => handleChange('password', e.target.value)}
+                      error={errors.password}
+                      required={!isEdit}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-9 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
-                ) : (
-                  <div className="p-4 bg-muted/30 rounded-lg">
-                    <p className="text-sm text-muted-foreground">
-                      💡 Để thay đổi mật khẩu, vui lòng sử dụng chức năng "Đặt lại mật khẩu" riêng
-                    </p>
+                  <div className="relative">
+                    <Input
+                      label="Xác nhận mật khẩu"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="Nhập lại mật khẩu"
+                      value={formData.confirmPassword}
+                      onChange={(e) => handleChange('confirmPassword', e.target.value)}
+                      error={errors.confirmPassword}
+                      required={!isEdit && !!formData.password}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-9 text-muted-foreground hover:text-foreground"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
 
@@ -372,13 +360,6 @@ export function UserForm() {
                     onChange={(e) => handleChange('email', e.target.value)}
                     error={errors.email}
                     required
-                  />
-                  <Input
-                    label="Số điện thoại"
-                    placeholder="VD: 0901234567"
-                    value={formData.phone}
-                    onChange={(e) => handleChange('phone', e.target.value)}
-                    error={errors.phone}
                   />
                 </div>
               </CardContent>
@@ -439,16 +420,17 @@ export function UserForm() {
                   </div>
                 )}
 
-                {requiresBranch(formData.role) && (
-                  <Select
-                    label="Chi nhánh"
-                    value={formData.branchId}
-                    onChange={(e) => handleChange('branchId', e.target.value)}
-                    options={branches.map((b) => ({ value: b.id, label: b.name }))}
-                    error={errors.branchId}
-                    required
-                  />
-                )}
+                <Select
+                  label="Chi nhánh"
+                  value={formData.branchId}
+                  onChange={(e) => handleChange('branchId', e.target.value)}
+                  options={[
+                    { value: '', label: '— Không thuộc chi nhánh —' },
+                    ...branches.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                  error={errors.branchId}
+                  required={requiresBranch(formData.role)}
+                />
               </CardContent>
             </Card>
 
@@ -456,9 +438,18 @@ export function UserForm() {
               <Button type="button" variant="outline" onClick={handleCancel}>
                 Hủy
               </Button>
-              <Button type="submit">
-                <Save className="h-4 w-4 mr-2" />
-                {isEdit ? 'Cập nhật' : 'Tạo tài khoản'}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Đang lưu...
+                  </span>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    {isEdit ? 'Cập nhật' : 'Tạo tài khoản'}
+                  </>
+                )}
               </Button>
             </div>
           </div>

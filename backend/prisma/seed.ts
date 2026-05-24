@@ -65,24 +65,49 @@ async function seedLotWithTransactions(input: {
 }
 
 async function main() {
-  console.log('Bat dau don dep co so du lieu...');
-  await prisma.auditLog.deleteMany({});
-  await prisma.salesOrderItem.deleteMany({});
-  await prisma.salesOrder.deleteMany({});
-  await prisma.prescriptionItem.deleteMany({});
-  await prisma.prescription.deleteMany({});
-  await prisma.stockTransferItem.deleteMany({});
-  await prisma.stockTransfer.deleteMany({});
-  await prisma.inventoryTransaction.deleteMany({});
-  await prisma.inventoryLot.deleteMany({});
-  await prisma.medicinePrice.deleteMany({});
-  await prisma.medicineUnitConversion.deleteMany({});
-  await prisma.user.deleteMany({});
-  await prisma.location.deleteMany({});
-  await prisma.medicine.deleteMany({});
-  await prisma.supplier.deleteMany({});
-  await prisma.category.deleteMany({});
-  await prisma.branch.deleteMany({});
+  const force = process.env.FORCE_SEED === 'true' || process.argv.includes('--force');
+  
+  let userCount = 0;
+  try {
+    userCount = await prisma.user.count();
+  } catch (error) {
+    console.log('Chua the dem so luong User. Co the cac bang chua duoc tao.');
+  }
+
+  if (userCount > 0 && !force) {
+    console.log('==================================================');
+    console.log('⚠️  Database đã có dữ liệu (User count > 0).');
+    console.log('👉 Bỏ qua việc nạp dữ liệu mẫu (seed) để tránh làm mất dữ liệu hiện tại.');
+    console.log('💡 Nếu bạn thực sự muốn làm trống và nạp lại toàn bộ dữ liệu mẫu, hãy chạy:');
+    console.log('   npm run prisma:seed -- --force');
+    console.log('==================================================');
+    return;
+  }
+
+  if (force) {
+    console.log('🔄 Đang thực hiện RESET TOÀN BỘ cơ sở dữ liệu...');
+    console.log('Bat dau don dep co so du lieu...');
+    await prisma.auditLog.deleteMany({});
+    await prisma.salesOrderItem.deleteMany({});
+    await prisma.salesOrder.deleteMany({});
+    await prisma.prescriptionItem.deleteMany({});
+    await prisma.prescription.deleteMany({});
+    await prisma.customer.deleteMany({});
+    await prisma.stockTransferItem.deleteMany({});
+    await prisma.stockTransfer.deleteMany({});
+    await prisma.inventoryTransaction.deleteMany({});
+    await prisma.inventoryLot.deleteMany({});
+    await prisma.medicinePrice.deleteMany({});
+    await prisma.medicineUnitConversion.deleteMany({});
+    await prisma.user.deleteMany({});
+    await prisma.location.deleteMany({});
+    await prisma.medicine.deleteMany({});
+    await prisma.supplier.deleteMany({});
+    await prisma.category.deleteMany({});
+    await prisma.branch.deleteMany({});
+  } else {
+    console.log('🌱 Database đang trống. Bắt đầu nạp dữ liệu mẫu đầu tiên...');
+  }
 
   console.log('Tao chi nhanh va vi tri luu tru...');
   const br1 = await prisma.branch.create({
@@ -269,6 +294,23 @@ async function main() {
       }
     }),
   ]);
+
+  console.log('Tao danh sach khach hang than thiet...');
+  const customersToCreate = Array.from({ length: 35 }, (_, i) => ({
+    id: `cust-${i + 1}`,
+    code: `CUS${String(i + 1).padStart(4, '0')}`,
+    name: ['Nguyễn Văn A', 'Jane Smith', 'John Doe', 'Alice Brown', 'Charlie Wilson'][i % 5] + ` ${i}`,
+    phone: i === 0 ? '0928123456' : i === 1 ? '0987654321' : i === 2 ? '0123456789' : `0555${String(1000 + i).padStart(4, '0')}`,
+    email: `customer${i + 1}@email.com`,
+    membershipTier: ['bronze', 'silver', 'gold', 'platinum'][i % 4],
+    points: i === 0 ? 850 : Math.floor(Math.random() * 1200),
+    joinDate: new Date(2024, i % 12, (i % 28) + 1).toISOString().split('T')[0],
+    address: `Số ${i + 1} Đường ABC, Quận ${1 + (i % 12)}, TP.HCM`,
+    dateOfBirth: new Date(1980 + (i % 25), i % 12, (i % 28) + 1).toISOString().split('T')[0],
+    status: 'active'
+  }));
+
+  await prisma.customer.createMany({ data: customersToCreate });
 
   console.log('Tao master data thuoc...');
   const [med1, med2, med3, med4, med5] = await Promise.all([
@@ -657,7 +699,7 @@ async function main() {
   const pres1 = await prisma.prescription.create({
     data: {
       prescriptionNumber: 'TOA-884021',
-      customerId: 'KH-0928 (Nguyen Van A)',
+      customerId: 'cust-1',
       doctorName: 'Bac si Nguyen Huu B',
       prescriptionDate: '2026-05-24',
       status: 'dispensed',
@@ -744,11 +786,15 @@ async function main() {
         const discount = subtotal > 200 ? 15 : subtotal > 100 ? 10 : 0;
         const total = subtotal - discount;
 
+        const isWalkIn = (i + j) % 3 === 0;
+        const customerId = isWalkIn ? null : `cust-${1 + ((i + j) % 35)}`;
+        const pointsEarned = isWalkIn ? 0 : Math.floor(total / 10);
+
         salesOrdersToCreate.push({
           id: orderId,
           invoiceNumber: invNo,
           branchId,
-          customerId: 'Khách lẻ',
+          customerId,
           cashierId: 'seed',
           cashierName,
           saleDate,
@@ -757,6 +803,7 @@ async function main() {
           total,
           paymentMethod: ['cash', 'card', 'transfer'][(i + j + offset) % 3],
           status: 'completed',
+          pointsEarned,
         });
 
         salesOrderItemsToCreate.push(...orderItems);
@@ -1019,6 +1066,76 @@ async function main() {
       },
     ],
   });
+
+  console.log('Tao promotion mau...');
+  const existingPromotions = await prisma.promotion.findMany();
+  if (existingPromotions.length === 0) {
+    await prisma.promotion.createMany({
+      data: [
+        {
+          id: 'default',
+          code: 'default',
+          name: 'VIP tích điểm thưởng mặc định',
+          value: 0,
+          status: 'active',
+          type: 'default',
+          description: 'Không chiết khấu hóa đơn, tích lũy điểm thưởng theo tỷ lệ 1% cơ bản ($10 = 1 điểm).',
+          usages: 124,
+          totalSavings: 0,
+          targetBranch: 'all'
+        },
+        {
+          id: 'percent_10',
+          code: 'percent_10',
+          name: 'Chiết khấu 10% tổng hóa đơn',
+          value: 10,
+          status: 'active',
+          type: 'percent',
+          description: 'Giảm trừ trực tiếp 10% trên tổng giá trị giỏ hàng trước thuế khi checkout lẻ.',
+          usages: 87,
+          totalSavings: 450,
+          targetBranch: 'all'
+        },
+        {
+          id: 'fixed_20',
+          code: 'fixed_20',
+          name: 'Giảm thẳng $20 trực tiếp',
+          value: 20,
+          status: 'active',
+          type: 'fixed',
+          description: 'Khấu trừ cố định $20 tiền mặt cho mọi đơn hàng POS bất kể trị giá.',
+          usages: 52,
+          totalSavings: 1040,
+          targetBranch: 'all'
+        },
+        {
+          id: 'combo_para',
+          code: 'combo_para',
+          name: 'Combo Paracetamol (Giảm thêm $5)',
+          value: 5,
+          status: 'active',
+          type: 'combo',
+          description: 'Ưu đãi kích cầu: Khấu trừ $5 trực tiếp khi đơn hàng POS có chứa thuốc Paracetamol Hapacol.',
+          usages: 63,
+          totalSavings: 315,
+          targetBranch: 'all'
+        },
+        {
+          id: 'vip_points',
+          code: 'vip_points',
+          name: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)',
+          value: 2,
+          status: 'active',
+          type: 'loyalty',
+          description: 'Áp dụng nhân đôi (x2) điểm tích lũy cho khách hàng VIP đạt thứ hạng thẻ Bạc, Vàng, Bạch Kim.',
+          usages: 114,
+          totalSavings: 0,
+          targetBranch: 'all'
+        }
+      ]
+    });
+    console.log('Da tao 5 chuong trinh khuyen mai mau!');
+  }
 
   console.log('=== SEEDING CO SO DU LIEU HOAN TAT ===');
 }

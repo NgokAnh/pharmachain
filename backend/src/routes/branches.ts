@@ -47,6 +47,10 @@ router.get('/:id', authenticateJWT, async (req: AuthenticatedRequest, res: Respo
               select: {
                 name: true,
               }
+            },
+            inventoryTransactions: {
+              where: { stockStatus: 'AVAILABLE' },
+              select: { quantity: true }
             }
           }
         },
@@ -63,7 +67,21 @@ router.get('/:id', authenticateJWT, async (req: AuthenticatedRequest, res: Respo
     if (!branch) {
       return res.status(404).json({ error: 'Không tìm thấy chi nhánh.' });
     }
-    res.json(branch);
+
+    // Tính toán số lượng tồn kho theo lô
+    const formattedBranch = {
+      ...branch,
+      inventoryLots: branch.inventoryLots.map((lot) => {
+        const quantity = lot.inventoryTransactions.reduce((sum, tx) => sum + tx.quantity, 0);
+        const { inventoryTransactions, ...rest } = lot;
+        return {
+          ...rest,
+          quantity
+        };
+      })
+    };
+
+    res.json(formattedBranch);
   } catch (err: any) {
     return respondWithDatabaseAwareError(res, err, 'Internal server error fetching branch details');
   }

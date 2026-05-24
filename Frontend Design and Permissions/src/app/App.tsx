@@ -15,6 +15,9 @@ import { SupplierForm } from '../pages/suppliers/SupplierForm';
 import { PurchaseList } from '../pages/purchases/PurchaseList';
 import { PurchaseForm } from '../pages/purchases/PurchaseForm';
 import { Inventory } from '../pages/inventory/Inventory';
+import { InventoryCheckList } from '../pages/inventory/InventoryCheckList';
+import { InventoryCheckForm } from '../pages/inventory/InventoryCheckForm';
+import { InventoryCheckDetail } from '../pages/inventory/InventoryCheckDetail';
 import { TransferList } from '../pages/transfers/TransferList';
 import { TransferForm } from '../pages/transfers/TransferForm';
 import { TransferDetail } from '../pages/transfers/TransferDetail';
@@ -23,11 +26,14 @@ import { POS } from '../pages/pos/POS';
 import { InvoiceList } from '../pages/invoices/InvoiceList';
 import { CustomerList } from '../pages/customers/CustomerList';
 import { CustomerDetail } from '../pages/customers/CustomerDetail';
+import { CustomerForm } from '../pages/customers/CustomerForm';
 import { Reports } from '../pages/reports/Reports';
 import { UserManagement } from '../pages/system/UserManagement';
 import { UserForm } from '../pages/system/UserForm';
 import { BranchManagement } from '../pages/system/BranchManagement';
 import { AuditLog } from '../pages/audit/AuditLog';
+import { PromotionList } from '../pages/promotions/PromotionList';
+import { PromotionForm } from '../pages/promotions/PromotionForm';
 
 export default function App() {
   return (
@@ -154,6 +160,33 @@ export default function App() {
                     />
 
                     <Route
+                      path="/inventory/checks"
+                      element={
+                        <ProtectedRoute permissions={['inventory.stocktake', 'inventory.adjust']}>
+                          <InventoryCheckList />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/inventory/checks/new"
+                      element={
+                        <ProtectedRoute permissions={['inventory.stocktake']}>
+                          <InventoryCheckForm />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/inventory/checks/:id"
+                      element={
+                        <ProtectedRoute permissions={['inventory.stocktake', 'inventory.adjust']}>
+                          <InventoryCheckDetail />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
                       path="/transfers"
                       element={
                         <ProtectedRoute permissions={['transfer.create', 'transfer.approve', 'transfer.ship', 'transfer.receive']}>
@@ -217,10 +250,55 @@ export default function App() {
                     />
 
                     <Route
+                      path="/customers/new"
+                      element={
+                        <ProtectedRoute permissions={['customer.manage']}>
+                          <CustomerForm />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
                       path="/customers/:id"
                       element={
                         <ProtectedRoute permissions={['customer.view']}>
                           <CustomerDetail />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/customers/:id/edit"
+                      element={
+                        <ProtectedRoute permissions={['customer.manage']}>
+                          <CustomerForm />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/promotions"
+                      element={
+                        <ProtectedRoute permissions={['promotion.view']}>
+                          <PromotionList />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/promotions/new"
+                      element={
+                        <ProtectedRoute permissions={['promotion.manage']}>
+                          <PromotionForm />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/promotions/:id/edit"
+                      element={
+                        <ProtectedRoute permissions={['promotion.manage']}>
+                          <PromotionForm />
                         </ProtectedRoute>
                       }
                     />

@@ -36,7 +36,9 @@ export type Permission =
   | 'branch.manage'
   | 'user.manage'
   | 'role.manage'
-  | 'audit.view';
+  | 'audit.view'
+  | 'promotion.view'
+  | 'promotion.manage';
 
 export interface User {
   id: string;
@@ -371,4 +373,23 @@ export interface PaginatedResponse<T> {
 export interface PaginationParams {
   page: number;
   size: number;
+}
+
+export interface Promotion {
+  id: string;
+  code: string;
+  name: string;
+  value: number;
+  status: 'active' | 'inactive' | 'expired';
+  type: string;
+  description: string;
+  usages: number;
+  totalSavings: number;
+  targetBranch: string;
+  config?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  targetGroup: string;
+  createdAt: string;
+  updatedAt: string;
 }

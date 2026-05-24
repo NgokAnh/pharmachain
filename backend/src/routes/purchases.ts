@@ -79,11 +79,22 @@ router.post(
   requirePermission('purchasing.receive'),
   async (req: AuthenticatedRequest, res: Response) => {
     const { supplierId, supplierName, invoiceNumber, invoiceDate, items } = req.body;
-    const branchId = req.user?.branchId;
+    let receiveBranchId = req.user?.branchId;
+    const userRole = req.user?.role;
 
-    if (!branchId) {
-      return res.status(403).json({ error: 'User does not belong to any branch to receive stock' });
+    if (!receiveBranchId) {
+      if (userRole === 'ROLE_ADMIN' || userRole === 'ROLE_CHAIN_MANAGER') {
+        if (req.body.branchId) {
+          receiveBranchId = req.body.branchId;
+        } else {
+          return res.status(400).json({ error: 'Quản trị viên cần chọn chi nhánh để nhập kho' });
+        }
+      } else {
+        return res.status(403).json({ error: 'User does not belong to any branch to receive stock' });
+      }
     }
+
+    const finalReceiveBranchId = receiveBranchId as string;
 
     if (!invoiceNumber || !invoiceDate) {
       return res.status(400).json({ error: 'Invoice number and invoice date are required' });
@@ -96,7 +107,7 @@ router.post(
     try {
       const result = await prisma.$transaction(async (tx) => {
         const receivingLocation = await tx.location.findFirst({
-          where: { branchId },
+          where: { branchId: finalReceiveBranchId },
           orderBy: { createdAt: 'asc' },
         });
 
@@ -137,7 +148,7 @@ router.post(
 
           let lot = await tx.inventoryLot.findFirst({
             where: {
-              branchId,
+              branchId: finalReceiveBranchId,
               locationId: receivingLocation.id,
               medicineId: medicine.id,
               lotNumber: item.batchNumber,
@@ -149,7 +160,7 @@ router.post(
             lot = await tx.inventoryLot.create({
               data: {
                 medicineId: medicine.id,
-                branchId,
+                branchId: finalReceiveBranchId,
                 locationId: receivingLocation.id,
                 lotNumber: item.batchNumber,
                 manufacturingDate: item.manufacturingDate || null,
@@ -178,7 +189,7 @@ router.post(
           await createInventoryTransaction(tx, {
             medicineId: medicine.id,
             inventoryLotId: lot.id,
-            branchId,
+            branchId: finalReceiveBranchId,
             locationId: receivingLocation.id,
             stockStatus: StockStatus.AVAILABLE,
             transactionType: InventoryTransactionType.RECEIPT,

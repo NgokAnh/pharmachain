@@ -46,11 +46,22 @@ router.get('/transfers', authenticateJWT, async (req: AuthenticatedRequest, res:
 // 2. Tạo yêu cầu chuyển kho (status = 'pending')
 router.post('/transfers', authenticateJWT, requirePermission('transfer.create'), async (req: AuthenticatedRequest, res: Response) => {
   const { toBranchId, items, notes } = req.body;
-  const fromBranchId = req.user?.branchId;
+  let transferFromBranchId = req.user?.branchId;
+  const userRole = req.user?.role;
 
-  if (!fromBranchId) {
-    return res.status(403).json({ error: 'Sender branch ID is required (must belong to a branch)' });
+  if (!transferFromBranchId) {
+    if (userRole === 'ROLE_ADMIN' || userRole === 'ROLE_CHAIN_MANAGER') {
+      if (req.body.fromBranchId) {
+        transferFromBranchId = req.body.fromBranchId;
+      } else {
+        return res.status(400).json({ error: 'Quản trị viên cần chọn chi nhánh xuất (fromBranchId) để chuyển kho' });
+      }
+    } else {
+      return res.status(403).json({ error: 'Tài khoản không thuộc chi nhánh nào để chuyển kho' });
+    }
   }
+
+  const finalTransferFromBranchId = transferFromBranchId as string;
 
   if (!toBranchId || !items || items.length === 0) {
     return res.status(400).json({ error: 'Target branch and items are required' });
@@ -61,7 +72,7 @@ router.post('/transfers', authenticateJWT, requirePermission('transfer.create'),
     const transfer = await prisma.stockTransfer.create({
       data: {
         transferNumber,
-        fromBranchId,
+        fromBranchId: finalTransferFromBranchId,
         toBranchId,
         requestDate: new Date().toISOString().split('T')[0],
         status: 'pending',

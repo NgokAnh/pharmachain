@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Header } from '../../components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
@@ -22,92 +22,99 @@ import {
   Check,
   Scan,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
+const API_BASE = 'http://localhost:3000/api';
 
-const branches = [
-  { id: 'br-1', name: 'Chi nhánh Quận 1' },
-  { id: 'br-2', name: 'Chi nhánh Quận 3' },
-  { id: 'br-3', name: 'Chi nhánh Hai Bà Trưng' },
-  { id: 'br-4', name: 'Chi nhánh Thanh Xuân' },
-  { id: 'br-5', name: 'Chi nhánh Cầu Giấy' },
-];
+interface TransferItem {
+  id: string;
+  medicineId: string;
+  medicineName: string;
+  lotNumber: string;
+  quantity: number;
+  picked?: number;
+}
 
-// Mock data for transfers
-const mockTransfers = [
-  {
-    id: 'tr-2',
-    transferNumber: 'TRF202400002',
-    fromBranchId: 'br-1',
-    toBranchId: 'br-2',
-    requestDate: '2024-05-16',
-    status: 'approved' as const,
-    requestedBy: 'Lê Văn C',
-    approvedBy: 'Trần Thị B',
-    items: [
-      {
-        id: 'item-2',
-        medicineId: 'med-2',
-        medicineName: 'Vitamin C 1000mg',
-        lotNumber: 'LOT002',
-        quantity: 300,
-        picked: 0,
-      },
-    ],
-  },
-  {
-    id: 'tr-3',
-    transferNumber: 'TRF202400003',
-    fromBranchId: 'br-3',
-    toBranchId: 'br-1',
-    requestDate: '2024-05-17',
-    status: 'in_transit' as const,
-    requestedBy: 'Phạm Thị D',
-    approvedBy: 'Trần Thị B',
-    items: [
-      {
-        id: 'item-3',
-        medicineId: 'med-3',
-        medicineName: 'Ibuprofen 400mg',
-        lotNumber: 'LOT003',
-        quantity: 100,
-        picked: 100,
-      },
-    ],
-  },
-];
+interface Transfer {
+  id: string;
+  transferNumber: string;
+  fromBranchId: string;
+  toBranchId: string;
+  requestDate: string;
+  status: 'pending' | 'approved' | 'in_transit' | 'completed' | 'cancelled';
+  requestedBy: string;
+  approvedBy: string;
+  items: TransferItem[];
+}
 
 export function WarehouseOperations() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
-  const [selectedTransfer, setSelectedTransfer] = useState<typeof mockTransfers[0] | null>(null);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [shipping, setShipping] = useState(false);
+
+  const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [pickedQuantities, setPickedQuantities] = useState<Record<string, number>>({});
   const [scanMode, setScanMode] = useState(false);
   const [scanInput, setScanInput] = useState('');
+
+  const getToken = () => localStorage.getItem('pharmacy_token');
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [transfersRes, branchesRes] = await Promise.all([
+        fetch(`${API_BASE}/transfers`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        }),
+        fetch(`${API_BASE}/branches`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        }),
+      ]);
+
+      if (transfersRes.ok) {
+        setTransfers(await transfersRes.json());
+      }
+      if (branchesRes.ok) {
+        setBranches(await branchesRes.json());
+      }
+    } catch (error) {
+      toast.error('Lỗi khi tải dữ liệu');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchData();
+  }, []);
 
   const getBranchName = (branchId: string) => {
     return branches.find((b) => b.id === branchId)?.name || branchId;
   };
 
   // Filter transfers for outbound (xuất kho)
-  const outboundTransfers = mockTransfers.filter(
+  const outboundTransfers = transfers.filter(
     (t) =>
-      t.fromBranchId === user?.branchId &&
+      (user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER' || t.fromBranchId === user?.branchId) &&
       (t.status === 'approved' || t.status === 'in_transit') &&
       (search === '' || t.transferNumber.toLowerCase().includes(search.toLowerCase()))
   );
 
   // Filter transfers for inbound (nhập kho)
-  const inboundTransfers = mockTransfers.filter(
+  const inboundTransfers = transfers.filter(
     (t) =>
-      t.toBranchId === user?.branchId &&
+      (user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER' || t.toBranchId === user?.branchId) &&
       t.status === 'in_transit' &&
       (search === '' || t.transferNumber.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const handleSelectTransfer = (transfer: typeof mockTransfers[0]) => {
+  const handleSelectTransfer = (transfer: Transfer) => {
     setSelectedTransfer(transfer);
     const initialPicked: Record<string, number> = {};
     transfer.items.forEach((item) => {
@@ -145,7 +152,7 @@ export function WarehouseOperations() {
     setScanInput('');
   };
 
-  const handleStartShipping = () => {
+  const handleStartShipping = async () => {
     if (!selectedTransfer) return;
 
     const allPicked = selectedTransfer.items.every(
@@ -157,13 +164,33 @@ export function WarehouseOperations() {
       return;
     }
 
-    toast.success(`Đã xuất kho phiếu ${selectedTransfer.transferNumber}`);
-    setSelectedTransfer(null);
-    setPickedQuantities({});
-    navigate('/transfers');
+    setShipping(true);
+    try {
+      const res = await fetch(`${API_BASE}/transfers/${selectedTransfer.id}/ship`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Lỗi khi xuất kho');
+      }
+
+      toast.success(`Đã xuất kho phiếu ${selectedTransfer.transferNumber}`);
+      setSelectedTransfer(null);
+      setPickedQuantities({});
+      void fetchData();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setShipping(false);
+    }
   };
 
-  const handleReceiveGoods = (transfer: typeof mockTransfers[0]) => {
+  const handleReceiveGoods = (transfer: Transfer) => {
     navigate(`/transfers/${transfer.id}`);
   };
 
@@ -304,9 +331,13 @@ export function WarehouseOperations() {
                 <Button variant="outline" onClick={() => setSelectedTransfer(null)}>
                   Hủy
                 </Button>
-                <Button onClick={handleStartShipping} disabled={!allPicked}>
-                  <ArrowRight className="h-4 w-4 mr-2" />
-                  Xác nhận xuất kho
+                <Button onClick={handleStartShipping} disabled={!allPicked || shipping}>
+                  {shipping ? (
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-4 w-4 mr-2" />
+                  )}
+                  {shipping ? 'Đang xuất kho...' : 'Xác nhận xuất kho'}
                 </Button>
               </div>
             </CardContent>
@@ -334,7 +365,12 @@ export function WarehouseOperations() {
           </div>
         </CardHeader>
         <CardContent>
-          {outboundTransfers.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <RefreshCw className="h-8 w-8 mx-auto text-muted-foreground animate-spin mb-4" />
+              <p className="text-muted-foreground">Đang tải dữ liệu...</p>
+            </div>
+          ) : outboundTransfers.length === 0 ? (
             <div className="text-center py-12">
               <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4 opacity-50" />
               <p className="text-muted-foreground">Không có phiếu cần xuất kho</p>
@@ -403,7 +439,12 @@ export function WarehouseOperations() {
           </div>
         </CardHeader>
         <CardContent>
-          {inboundTransfers.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <RefreshCw className="h-8 w-8 mx-auto text-muted-foreground animate-spin mb-4" />
+              <p className="text-muted-foreground">Đang tải dữ liệu...</p>
+            </div>
+          ) : inboundTransfers.length === 0 ? (
             <div className="text-center py-12">
               <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4 opacity-50" />
               <p className="text-muted-foreground">Không có phiếu cần nhập kho</p>

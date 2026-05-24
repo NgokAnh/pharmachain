@@ -45,6 +45,11 @@ router.get('/inventory', authenticateJWT, requirePermission('inventory.view'), a
         return res.status(403).json({ error: 'User does not belong to any branch' });
       }
       branchFilter = userBranchId;
+    } else {
+      // Đối với Admin và Chain Manager, nếu họ truyền query.branchId, ta lọc theo chi nhánh đó
+      if (req.query.branchId && req.query.branchId !== 'all') {
+        branchFilter = String(req.query.branchId);
+      }
     }
 
     const snapshot = await buildInventorySnapshot(prisma, branchFilter);

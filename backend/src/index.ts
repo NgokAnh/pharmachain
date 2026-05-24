@@ -16,6 +16,11 @@ import posRouter from './routes/pos';
 import purchasesRouter from './routes/purchases';
 import transfersRouter from './routes/transfers';
 import auditRouter from './routes/audit';
+import customersRouter from './routes/customers';
+import usersRouter from './routes/users';
+import reportsRouter from './routes/reports';
+import inventoryChecksRouter from './routes/inventory-checks';
+import promotionsRouter from './routes/promotions';
 
 dotenv.config();
 
@@ -53,6 +58,11 @@ app.use('/api/pos', posRouter);
 app.use('/api', purchasesRouter);
 app.use('/api', transfersRouter);
 app.use('/api', auditRouter);
+app.use('/api/customers', customersRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/inventory-checks', inventoryChecksRouter);
+app.use('/api/promotions', promotionsRouter);
 
 // Start server
 app.listen(PORT, () => {

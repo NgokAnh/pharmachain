@@ -21,18 +21,46 @@ const router = Router();
 
 // 1. POS Checkout API - Áp dụng Strategy Pattern & Đối soát an toàn trừ tồn kho
 router.post('/checkout', authenticateJWT, requirePermission('sales.create'), async (req: AuthenticatedRequest, res: Response) => {
-  const { cart, customerId, customerTier, promoType, paymentMethod, prescriptionId, capturedImage } = req.body;
+  const { cart, customerId, customerTier, promoType, promoValue, paymentMethod, prescriptionId, capturedImage } = req.body;
   const userBranchId = req.user?.branchId;
 
   if (!cart || cart.length === 0) {
     return res.status(400).json({ error: 'Cart is empty' });
   }
 
-  if (!userBranchId) {
-    return res.status(403).json({ error: 'User does not belong to any branch to perform POS sales' });
+  let checkoutBranchId = userBranchId;
+  const userRole = req.user?.role;
+
+  if (!checkoutBranchId) {
+    if (userRole === 'ROLE_ADMIN' || userRole === 'ROLE_CHAIN_MANAGER') {
+      if (req.body.branchId) {
+        checkoutBranchId = req.body.branchId;
+      } else {
+        return res.status(400).json({ error: 'Quản trị viên/Quản lý chuỗi cần chọn chi nhánh để thực hiện bán hàng' });
+      }
+    } else {
+      return res.status(403).json({ error: 'Tài khoản không thuộc chi nhánh nào để bán hàng' });
+    }
   }
 
+  const finalCheckoutBranchId = checkoutBranchId as string;
+
   try {
+    // Look up real customer details
+    let customer = null;
+    let computedTier: 'normal' | 'silver' | 'gold' | 'platinum' = 'normal';
+
+    if (customerId && customerId !== 'Khách lẻ' && customerId !== 'Khách vãng lai') {
+      customer = await prisma.customer.findUnique({
+        where: { id: customerId }
+      });
+      if (customer) {
+        computedTier = customer.membershipTier === 'bronze' ? 'normal' : customer.membershipTier as any;
+      }
+    } else if (customerTier) {
+      computedTier = customerTier === 'bronze' ? 'normal' : customerTier;
+    }
+
     // A. Tính toán giá tiền và khuyến mãi ở phía Server sử dụng Strategy Pattern
     const subtotal = cart.reduce(
       (sum: number, item: any) => sum + Number(item.total ?? item.price * item.quantity),
@@ -46,32 +74,167 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
         price: Number(i.total ?? i.price * i.quantity),
         quantity: Number(i.quantity),
       })),
-      customerTier: customerTier || 'normal',
+      customerTier: computedTier,
     };
 
-    const calculator = new PromotionCalculator();
-    switch (promoType) {
-      case 'percent_10':
-        calculator.setStrategy(new PercentDiscountStrategy(10));
-        break;
-      case 'fixed_20':
-        calculator.setStrategy(new FixedAmountStrategy(20));
-        break;
-      case 'combo_para':
-        const DHG = await prisma.medicine.findFirst({ where: { code: 'MED0001' } });
-        calculator.setStrategy(new ComboStrategy(DHG?.id || 'med-1', 5));
-        break;
-      case 'vip_points':
-        calculator.setStrategy(new PointRewardStrategy());
-        break;
-      default:
-        calculator.setStrategy(new DefaultStrategy());
-        break;
+    let discountAmount = 0;
+    let rewardPoints = Math.floor(subtotal / 10); // default base points
+    
+    let dbPromoApplied = false;
+    if (promoType && promoType !== 'default') {
+      try {
+        const promotion = await prisma.promotion.findUnique({
+          where: { id: promoType }
+        });
+        
+        if (promotion && promotion.status === 'active') {
+          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+          if (promotion.startDate && todayStr < promotion.startDate) {
+            return res.status(400).json({ error: `Chương trình khuyến mãi chưa bắt đầu. Thời hạn áp dụng từ: ${promotion.startDate}` });
+          }
+          if (promotion.endDate && todayStr > promotion.endDate) {
+            return res.status(400).json({ error: `Chương trình khuyến mãi đã hết hạn sử dụng ngày: ${promotion.endDate}` });
+          }
+          if (promotion.targetGroup && promotion.targetGroup !== 'all') {
+            const allowedTiers = promotion.targetGroup.split(',').map(t => t.trim().toLowerCase());
+            if (!allowedTiers.includes(computedTier.toLowerCase())) {
+              return res.status(400).json({ error: `Khuyến mãi chỉ áp dụng cho nhóm khách hàng: ${promotion.targetGroup.toUpperCase()}` });
+            }
+          }
+
+          const config = promotion.config ? JSON.parse(promotion.config) : {};
+          dbPromoApplied = true;
+          
+          switch (promotion.type) {
+            case 'percent':
+            case 'percent_discount': {
+              const minOrder = Number(config.minOrderValue || 0);
+              const pct = Number(promotion.value || config.percent || 0);
+              if (subtotal >= minOrder) {
+                discountAmount = subtotal * (pct / 100);
+              }
+              break;
+            }
+            case 'fixed':
+            case 'fixed_discount': {
+              const minOrder = Number(config.minOrderValue || 0);
+              const amt = Number(promotion.value || config.amount || 0);
+              if (subtotal >= minOrder) {
+                discountAmount = Math.min(amt, subtotal);
+              }
+              break;
+            }
+            case 'combo':
+            case 'buy_gift': {
+              const buyMedId = config.buyMedicineId;
+              const giftMedId = config.giftMedicineId;
+              const buyQty = Number(config.buyQuantity || 1);
+              const giftQty = Number(config.giftQuantity || 1);
+              const buyUnit = config.buyUnit;
+              const giftUnit = config.giftUnit;
+              
+              if (buyMedId && giftMedId) {
+                const buyItem = cart.find((i: any) => 
+                  i.medicineId === buyMedId &&
+                  (!buyUnit || i.selectedUnit === buyUnit)
+                );
+                if (buyItem && buyItem.quantity >= buyQty) {
+                  const giftItem = cart.find((i: any) => 
+                    i.medicineId === giftMedId &&
+                    (!giftUnit || i.selectedUnit === giftUnit)
+                  );
+                  if (giftItem) {
+                    const applicableGiftQty = Math.min(giftItem.quantity, giftQty * Math.floor(buyItem.quantity / buyQty));
+                    const giftUnitPrice = Number(giftItem.price || (giftItem.total / giftItem.quantity));
+                    discountAmount = giftUnitPrice * applicableGiftQty;
+                  }
+                }
+              }
+              break;
+            }
+            case 'loyalty':
+            case 'loyalty_points': {
+              let multiplier = 1.0;
+              const silverMult = Number(config.silverMultiplier ?? 1.2);
+              const goldMult = Number(config.goldMultiplier ?? 1.5);
+              const platMult = Number(config.platinumMultiplier ?? 2.0);
+              
+              if (computedTier === 'silver') multiplier = silverMult;
+              if (computedTier === 'gold') multiplier = goldMult;
+              if (computedTier === 'platinum') multiplier = platMult;
+              
+              const finalTotal = Math.max(0, subtotal - discountAmount);
+              const basePoints = Math.floor(finalTotal / 10);
+              rewardPoints = Math.floor(basePoints * multiplier);
+              break;
+            }
+            case 'category_voucher': {
+              const catId = config.categoryId;
+              const discType = config.discountType || 'percent';
+              const discVal = Number(config.discountValue || promotion.value || 0);
+              
+              if (catId) {
+                const medIds = cart.map((i: any) => i.medicineId);
+                const dbMedicines = await prisma.medicine.findMany({
+                  where: { id: { in: medIds } },
+                  select: { id: true, categoryId: true }
+                });
+                
+                const medicinesInCat = dbMedicines
+                  .filter(m => m.categoryId === catId)
+                  .map(m => m.id);
+                  
+                const catSubtotal = cart
+                  .filter((i: any) => medicinesInCat.includes(i.medicineId))
+                  .reduce((sum: number, i: any) => sum + Number(i.total ?? i.price * i.quantity), 0);
+                  
+                if (catSubtotal > 0) {
+                  if (discType === 'percent') {
+                    discountAmount = catSubtotal * (discVal / 100);
+                  } else {
+                    discountAmount = Math.min(discVal, catSubtotal);
+                  }
+                }
+              }
+              break;
+            }
+            default:
+              dbPromoApplied = false;
+              break;
+          }
+        }
+      } catch (err) {
+        console.error('Error calculating database promotion:', err);
+      }
     }
 
-    const discountAmount = calculator.calculateDiscount(orderData);
+    if (!dbPromoApplied) {
+      // Fallback Strategy calculation for backward compatibility (Hardcoded presets)
+      const customPromoValue = promoValue !== undefined ? Number(promoValue) : null;
+      const calculator = new PromotionCalculator();
+      switch (promoType) {
+        case 'percent_10':
+          calculator.setStrategy(new PercentDiscountStrategy(customPromoValue ?? 10));
+          break;
+        case 'fixed_20':
+          calculator.setStrategy(new FixedAmountStrategy(customPromoValue ?? 20));
+          break;
+        case 'combo_para':
+          const DHG = await prisma.medicine.findFirst({ where: { code: 'MED0001' } });
+          calculator.setStrategy(new ComboStrategy(DHG?.id || 'med-1', customPromoValue ?? 5));
+          break;
+        case 'vip_points':
+          calculator.setStrategy(new PointRewardStrategy());
+          break;
+        default:
+          calculator.setStrategy(new DefaultStrategy());
+          break;
+      }
+      discountAmount = calculator.calculateDiscount(orderData);
+      rewardPoints = calculator.calculatePoints(orderData);
+    }
+
     const totalAmount = Math.max(0, subtotal - discountAmount);
-    const rewardPoints = calculator.calculatePoints(orderData);
 
     const invoiceNumber = `INV${Date.now()}`;
     const prescriptionCode = prescriptionId || `TOA-${Date.now().toString().slice(-6)}`;
@@ -85,10 +248,10 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
             throw new Error(`So luong quy doi cua ${item.name} khong hop le.`);
           }
 
-          const allocation = await pickBatchFefo(tx, item.medicineId, userBranchId, baseQuantity);
+          const allocation = await pickBatchFefo(tx, item.medicineId, finalCheckoutBranchId, baseQuantity);
 
           if (allocation.shortage > 0) {
-            const guidance = await buildShortageGuidance(tx, item.medicineId, userBranchId);
+            const guidance = await buildShortageGuidance(tx, item.medicineId, finalCheckoutBranchId);
             throw new Error(
               `Khong du ton FEFO cho ${item.name}. Thieu ${allocation.shortage} don vi sau khi loc cac lo can ban. ${guidance}`
             );
@@ -107,8 +270,8 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
       const salesOrder = await tx.salesOrder.create({
         data: {
           invoiceNumber,
-          branchId: userBranchId,
-          customerId: customerId || 'Khách vãng lai',
+          branchId: finalCheckoutBranchId,
+          customerId: customer ? customer.id : null,
           cashierId: req.user?.id || 'system',
           cashierName: req.user?.username || 'system',
           subtotal,
@@ -117,8 +280,45 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
           paymentMethod,
           status: 'completed',
           prescriptionId: cart.some((i: any) => i.isPrescriptionRequired) ? prescriptionCode : null,
+          pointsEarned: rewardPoints,
         }
       });
+
+      // Update promotion usages and total savings
+      if (dbPromoApplied && promoType && promoType !== 'default') {
+        const existingPromo = await tx.promotion.findUnique({
+          where: { id: promoType }
+        });
+        if (existingPromo) {
+          await tx.promotion.update({
+            where: { id: promoType },
+            data: {
+              usages: { increment: 1 },
+              totalSavings: { increment: discountAmount }
+            }
+          });
+        }
+      }
+
+      // Update customer points and auto-tier upgrade
+      if (customer) {
+        const nextPoints = customer.points + rewardPoints;
+        
+        // Auto-upgrade logic
+        let nextTier = customer.membershipTier;
+        if (nextPoints >= 2000) nextTier = 'platinum';
+        else if (nextPoints >= 1000) nextTier = 'gold';
+        else if (nextPoints >= 500) nextTier = 'silver';
+        else nextTier = 'bronze';
+
+        await tx.customer.update({
+          where: { id: customer.id },
+          data: {
+            points: nextPoints,
+            membershipTier: nextTier,
+          }
+        });
+      }
 
       // 2. Tạo SalesOrderItems và ghi ledger xuất kho theo FEFO
       for (const prepared of preparedItems) {
@@ -142,7 +342,7 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
           await createInventoryTransaction(tx, {
             medicineId: prepared.item.medicineId,
             inventoryLotId: allocation.inventoryLotId,
-            branchId: userBranchId,
+            branchId: finalCheckoutBranchId,
             locationId: allocation.locationId,
             stockStatus: StockStatus.AVAILABLE,
             transactionType: InventoryTransactionType.SALE,
@@ -173,7 +373,7 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
         prisma.prescription.create({
           data: {
             prescriptionNumber: prescriptionCode,
-            customerId: customerId || 'Khách vãng lai',
+            customerId: customer ? customer.id : null,
             doctorName: 'Bác sĩ điều trị quầy POS',
             prescriptionDate: new Date().toISOString().split('T')[0],
             imageUrl: capturedImage,
@@ -292,14 +492,16 @@ router.get('/invoices', authenticateJWT, requirePermission('sales.view'), async 
       }
     }
 
-    // Tìm kiếm nhanh (Invoice Number, Customer, Cashier)
+    // Tìm kiếm nhanh (Invoice Number, Customer name/phone/code, Cashier)
     let searchFilter: any = {};
     if (search) {
       const searchStr = String(search);
       searchFilter = {
         OR: [
           { invoiceNumber: { contains: searchStr, mode: 'insensitive' } },
-          { customerId: { contains: searchStr, mode: 'insensitive' } },
+          { customer: { name: { contains: searchStr, mode: 'insensitive' } } },
+          { customer: { phone: { contains: searchStr, mode: 'insensitive' } } },
+          { customer: { code: { contains: searchStr, mode: 'insensitive' } } },
           { cashierName: { contains: searchStr, mode: 'insensitive' } },
         ]
       };
@@ -313,6 +515,7 @@ router.get('/invoices', authenticateJWT, requirePermission('sales.view'), async 
       },
       include: {
         items: true,
+        customer: true,
         branch: {
           select: {
             name: true,
@@ -357,6 +560,7 @@ router.get('/invoices/:id', authenticateJWT, requirePermission('sales.view'), as
       where: { id },
       include: {
         items: true,
+        customer: true,
         branch: {
           select: {
             name: true,

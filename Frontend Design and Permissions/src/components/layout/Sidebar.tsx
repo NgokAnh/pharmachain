@@ -31,117 +31,151 @@ interface MenuItem {
   permissions?: Permission[];
 }
 
-const menuItems: MenuItem[] = [
+interface MenuGroup {
+  groupName?: string;
+  items: MenuItem[];
+}
+
+const menuGroups: MenuGroup[] = [
   {
-    label: 'Tổng quan',
-    icon: LayoutDashboard,
-    path: '/dashboard',
+    items: [
+      {
+        label: 'Tổng quan',
+        icon: LayoutDashboard,
+        path: '/dashboard',
+      },
+    ],
   },
   {
-    label: 'Danh mục thuốc',
-    icon: Pill,
-    path: '/medicines',
-    permissions: ['medicine.view'],
+    groupName: 'Sản phẩm & Đối tác',
+    items: [
+      {
+        label: 'Danh mục thuốc',
+        icon: Pill,
+        path: '/medicines',
+        permissions: ['medicine.view'],
+      },
+      {
+        label: 'Nhóm thuốc',
+        icon: Tag,
+        path: '/medicines/categories',
+        permissions: ['medicine.category.manage'],
+      },
+      {
+        label: 'Nhà cung cấp',
+        icon: Building2,
+        path: '/suppliers',
+        permissions: ['supplier.view'],
+      },
+    ],
   },
   {
-    label: 'Nhóm thuốc',
-    icon: Tag,
-    path: '/medicines/categories',
-    permissions: ['medicine.category.manage'],
+    groupName: 'Giao dịch kho',
+    items: [
+      {
+        label: 'Nhập hàng',
+        icon: ShoppingCart,
+        path: '/purchases',
+        permissions: ['purchasing.create', 'purchasing.receive'],
+      },
+      {
+        label: 'Tồn kho',
+        icon: Package,
+        path: '/inventory',
+        permissions: ['inventory.view'],
+      },
+      {
+        label: 'Kiểm kho',
+        icon: PackageCheck,
+        path: '/inventory/checks',
+        permissions: ['inventory.stocktake', 'inventory.adjust'],
+      },
+      {
+        label: 'Chuyển kho',
+        icon: ArrowLeftRight,
+        path: '/transfers',
+        permissions: ['transfer.create', 'transfer.approve'],
+      },
+      {
+        label: 'Xuất nhập kho',
+        icon: PackageOpen,
+        path: '/warehouse',
+        permissions: ['transfer.ship'],
+      },
+    ],
   },
   {
-    label: 'Nhà cung cấp',
-    icon: Building2,
-    path: '/suppliers',
-    permissions: ['supplier.view'],
+    groupName: 'Bán hàng & Khách hàng',
+    items: [
+      {
+        label: 'Bán hàng (POS)',
+        icon: CreditCard,
+        path: '/pos',
+        permissions: ['sales.create'],
+      },
+      {
+        label: 'Hóa đơn lẻ',
+        icon: Receipt,
+        path: '/invoices',
+        permissions: ['sales.view'],
+      },
+      {
+        label: 'Khách hàng',
+        icon: Users,
+        path: '/customers',
+        permissions: ['customer.view'],
+      },
+      {
+        label: 'Khuyến mãi',
+        icon: Percent,
+        path: '/promotions',
+        permissions: ['promotion.view'],
+      },
+    ],
   },
   {
-    label: 'Nhập hàng',
-    icon: ShoppingCart,
-    path: '/purchases',
-    permissions: ['purchasing.create', 'purchasing.receive'],
-  },
-  {
-    label: 'Tồn kho',
-    icon: Package,
-    path: '/inventory',
-    permissions: ['inventory.view'],
-  },
-  {
-    label: 'Kiểm kho',
-    icon: PackageCheck,
-    path: '/inventory/checks',
-    permissions: ['inventory.stocktake', 'inventory.adjust'],
-  },
-  {
-    label: 'Chuyển kho',
-    icon: ArrowLeftRight,
-    path: '/transfers',
-    permissions: ['transfer.create', 'transfer.approve'],
-  },
-  {
-    label: 'Xuất nhập kho',
-    icon: PackageOpen,
-    path: '/warehouse',
-    permissions: ['transfer.ship'],
-  },
-  {
-    label: 'Bán hàng',
-    icon: CreditCard,
-    path: '/pos',
-    permissions: ['sales.create'],
-  },
-  {
-    label: 'Hóa đơn lẻ',
-    icon: Receipt,
-    path: '/invoices',
-    permissions: ['sales.view'],
-  },
-  {
-    label: 'Khách hàng',
-    icon: Users,
-    path: '/customers',
-    permissions: ['customer.view'],
-  },
-  {
-    label: 'Khuyến mãi',
-    icon: Percent,
-    path: '/promotions',
-    permissions: ['promotion.view'],
-  },
-  {
-    label: 'Báo cáo',
-    icon: BarChart3,
-    path: '/reports',
-    permissions: ['report.view_branch', 'report.view_chain'],
-  },
-  {
-    label: 'Chi nhánh',
-    icon: Building,
-    path: '/system/branches',
-    permissions: ['branch.manage'],
-  },
-  {
-    label: 'Hệ thống',
-    icon: Settings,
-    path: '/system',
-    permissions: ['user.manage', 'role.manage'],
-  },
-  {
-    label: 'Nhật ký',
-    icon: FileSpreadsheet,
-    path: '/audit',
-    permissions: ['audit.view'],
+    groupName: 'Hệ thống & Báo cáo',
+    items: [
+      {
+        label: 'Báo cáo doanh thu',
+        icon: BarChart3,
+        path: '/reports',
+        permissions: ['report.view_branch', 'report.view_chain'],
+      },
+      {
+        label: 'Quản lý chi nhánh',
+        icon: Building,
+        path: '/system/branches',
+        permissions: ['branch.manage'],
+      },
+      {
+        label: 'Tài khoản hệ thống',
+        icon: Settings,
+        path: '/system',
+        permissions: ['user.manage', 'role.manage'],
+      },
+      {
+        label: 'Nhật ký hoạt động',
+        icon: FileSpreadsheet,
+        path: '/audit',
+        permissions: ['audit.view'],
+      },
+    ],
   },
 ];
 
 export function Sidebar() {
   const { user, logout, hasAnyPermission } = useAuth();
 
-  const visibleMenuItems = menuItems.filter((item) => {
-    if (!item.permissions) return true;
-    return hasAnyPermission(item.permissions);
-  });
+  const visibleGroups = menuGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (!item.permissions) return true;
+        return hasAnyPermission(item.permissions);
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <div className="w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col">
@@ -165,27 +199,38 @@ export function Sidebar() {
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-        {visibleMenuItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent/50'
-                )
-              }
-            >
-              <Icon className="h-5 w-5" />
-              <span>{item.label}</span>
-            </NavLink>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto p-4 space-y-6">
+        {visibleGroups.map((group, groupIndex) => (
+          <div key={groupIndex} className="space-y-1.5">
+            {group.groupName && (
+              <h2 className="px-3 text-xs font-semibold text-sidebar-foreground/45 uppercase tracking-wider">
+                {group.groupName}
+              </h2>
+            )}
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    className={({ isActive }) =>
+                      clsx(
+                        'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium',
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                          : 'text-sidebar-foreground hover:bg-sidebar-accent/50'
+                      )
+                    }
+                  >
+                    <Icon className="h-4.5 w-4.5" />
+                    <span>{item.label}</span>
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="p-4 border-t border-sidebar-border">
@@ -200,7 +245,7 @@ export function Sidebar() {
         </div>
         <button
           onClick={logout}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors text-sm font-medium"
         >
           <LogOut className="h-5 w-5" />
           <span>Đăng xuất</span>
@@ -209,3 +254,4 @@ export function Sidebar() {
     </div>
   );
 }
+

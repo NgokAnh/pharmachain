@@ -1,0 +1,396 @@
+import { Router, Response } from 'express';
+import { InventoryTransactionType, StockStatus } from '@prisma/client';
+import { authenticateJWT, AuthenticatedRequest, requirePermission } from '../middleware/auth';
+import { prisma, respondWithDatabaseAwareError } from '../lib/prisma';
+import {
+  PromotionCalculator,
+  PercentDiscountStrategy,
+  FixedAmountStrategy,
+  ComboStrategy,
+  PointRewardStrategy,
+  DefaultStrategy,
+  Order as PromoOrder,
+} from '../strategies/promotions';
+import {
+  buildShortageGuidance,
+  createInventoryTransaction,
+  pickBatchFefo,
+} from '../services/inventory';
+
+const router = Router();
+
+// 1. POS Checkout API - Áp dụng Strategy Pattern & Đối soát an toàn trừ tồn kho
+router.post('/checkout', authenticateJWT, requirePermission('sales.create'), async (req: AuthenticatedRequest, res: Response) => {
+  const { cart, customerId, customerTier, promoType, paymentMethod, prescriptionId, capturedImage } = req.body;
+  const userBranchId = req.user?.branchId;
+
+  if (!cart || cart.length === 0) {
+    return res.status(400).json({ error: 'Cart is empty' });
+  }
+
+  if (!userBranchId) {
+    return res.status(403).json({ error: 'User does not belong to any branch to perform POS sales' });
+  }
+
+  try {
+    // A. Tính toán giá tiền và khuyến mãi ở phía Server sử dụng Strategy Pattern
+    const subtotal = cart.reduce(
+      (sum: number, item: any) => sum + Number(item.total ?? item.price * item.quantity),
+      0
+    );
+    const orderData: PromoOrder = {
+      subtotal,
+      items: cart.map((i: any) => ({
+        medicineId: i.medicineId,
+        name: i.name,
+        price: Number(i.total ?? i.price * i.quantity),
+        quantity: Number(i.quantity),
+      })),
+      customerTier: customerTier || 'normal',
+    };
+
+    const calculator = new PromotionCalculator();
+    switch (promoType) {
+      case 'percent_10':
+        calculator.setStrategy(new PercentDiscountStrategy(10));
+        break;
+      case 'fixed_20':
+        calculator.setStrategy(new FixedAmountStrategy(20));
+        break;
+      case 'combo_para':
+        const DHG = await prisma.medicine.findFirst({ where: { code: 'MED0001' } });
+        calculator.setStrategy(new ComboStrategy(DHG?.id || 'med-1', 5));
+        break;
+      case 'vip_points':
+        calculator.setStrategy(new PointRewardStrategy());
+        break;
+      default:
+        calculator.setStrategy(new DefaultStrategy());
+        break;
+    }
+
+    const discountAmount = calculator.calculateDiscount(orderData);
+    const totalAmount = Math.max(0, subtotal - discountAmount);
+    const rewardPoints = calculator.calculatePoints(orderData);
+
+    const invoiceNumber = `INV${Date.now()}`;
+    const prescriptionCode = prescriptionId || `TOA-${Date.now().toString().slice(-6)}`;
+
+    // B. Transaction ngắn gọn — chỉ xử lý các thao tác tài chính quan trọng (SalesOrder + Inventory ledger)
+    const result = await prisma.$transaction(async (tx) => {
+      const preparedItems = await Promise.all(
+        cart.map(async (item: any) => {
+          const baseQuantity = Number(item.baseQuantity ?? item.quantity);
+          if (!Number.isFinite(baseQuantity) || baseQuantity <= 0) {
+            throw new Error(`So luong quy doi cua ${item.name} khong hop le.`);
+          }
+
+          const allocation = await pickBatchFefo(tx, item.medicineId, userBranchId, baseQuantity);
+
+          if (allocation.shortage > 0) {
+            const guidance = await buildShortageGuidance(tx, item.medicineId, userBranchId);
+            throw new Error(
+              `Khong du ton FEFO cho ${item.name}. Thieu ${allocation.shortage} don vi sau khi loc cac lo can ban. ${guidance}`
+            );
+          }
+
+          return {
+            item,
+            baseQuantity,
+            baseUnitPrice: Number(item.baseUnitPrice ?? item.price),
+            allocations: allocation.allocations,
+          };
+        })
+      );
+
+      // 1. Tạo bản ghi SalesOrder
+      const salesOrder = await tx.salesOrder.create({
+        data: {
+          invoiceNumber,
+          branchId: userBranchId,
+          customerId: customerId || 'Khách vãng lai',
+          cashierId: req.user?.id || 'system',
+          cashierName: req.user?.username || 'system',
+          subtotal,
+          discount: discountAmount,
+          total: totalAmount,
+          paymentMethod,
+          status: 'completed',
+          prescriptionId: cart.some((i: any) => i.isPrescriptionRequired) ? prescriptionCode : null,
+        }
+      });
+
+      // 2. Tạo SalesOrderItems và ghi ledger xuất kho theo FEFO
+      for (const prepared of preparedItems) {
+        for (const allocation of prepared.allocations) {
+          await tx.salesOrderItem.create({
+            data: {
+              salesOrderId: salesOrder.id,
+              medicineId: prepared.item.medicineId,
+              medicineName: prepared.item.name,
+              lotNumber: allocation.lotNumber,
+              quantity: allocation.quantity,
+              unitPrice: prepared.baseUnitPrice,
+              discount: 0,
+              totalPrice: prepared.baseUnitPrice * allocation.quantity,
+              dosage: prepared.item.dosage || null,
+              frequency: prepared.item.frequency || null,
+              duration: prepared.item.duration || null,
+            }
+          });
+
+          await createInventoryTransaction(tx, {
+            medicineId: prepared.item.medicineId,
+            inventoryLotId: allocation.inventoryLotId,
+            branchId: userBranchId,
+            locationId: allocation.locationId,
+            stockStatus: StockStatus.AVAILABLE,
+            transactionType: InventoryTransactionType.SALE,
+            quantity: -allocation.quantity,
+            referenceType: 'sale',
+            referenceId: salesOrder.id,
+            referenceNumber: invoiceNumber,
+            createdByUserId: req.user?.id || 'system',
+            createdByUserName: req.user?.username || 'system',
+            notes: prepared.item.selectedUnit
+              ? `Xuat kho FEFO cho don POS ${invoiceNumber}: ${prepared.item.quantity} ${prepared.item.selectedUnit} = ${prepared.baseQuantity} don vi co so`
+              : `Xuat kho FEFO cho don POS ${invoiceNumber}`
+          });
+        }
+      }
+
+      return { salesOrderId: salesOrder.id, invoiceNumber, rewardPoints };
+    }, {
+      maxWait: 15000,
+      timeout: 30000
+    });
+
+    // C. Lưu ảnh toa thuốc và Audit Log SAU KHI transaction tài chính đã commit thành công
+    const postCommitTasks: Promise<any>[] = [];
+
+    if (cart.some((i: any) => i.isPrescriptionRequired) && capturedImage) {
+      postCommitTasks.push(
+        prisma.prescription.create({
+          data: {
+            prescriptionNumber: prescriptionCode,
+            customerId: customerId || 'Khách vãng lai',
+            doctorName: 'Bác sĩ điều trị quầy POS',
+            prescriptionDate: new Date().toISOString().split('T')[0],
+            imageUrl: capturedImage,
+            status: 'dispensed',
+            verifiedBy: req.user?.username || 'system',
+            verifiedDate: new Date().toISOString()
+          }
+        }).then(async (dbPres) => {
+          await Promise.all(
+            cart
+              .filter((i: any) => i.isPrescriptionRequired)
+              .map((item: any) =>
+                prisma.prescriptionItem.create({
+                  data: {
+                    prescriptionId: dbPres.id,
+                    medicineName: item.name,
+                    quantity: item.quantity,
+                    dosage: item.dosage || 'Uống sau ăn',
+                    frequency: item.frequency || '2 lần / ngày',
+                    duration: item.duration || '7 ngày'
+                  }
+                })
+              )
+          );
+        })
+      );
+    }
+
+    postCommitTasks.push(
+      prisma.auditLog.create({
+        data: {
+          userId: req.user?.id || 'system',
+          userName: req.user?.username || 'pharmacist',
+          action: 'create',
+          entityType: 'sale',
+          entityId: result.salesOrderId,
+          details: `Dược sĩ đã xuất bán hóa đơn lẻ ${invoiceNumber} trị giá $${totalAmount.toFixed(2)} theo FEFO. ${
+            cart.some((i: any) => i.isPrescriptionRequired) ? `Lưu ảnh chụp camera toa thuốc kê đơn ${prescriptionCode}.` : ''
+          } Áp dụng Strategy Khuyến mãi: ${promoType.toUpperCase()} (+${rewardPoints} Điểm thưởng).`,
+          ipAddress: req.ip
+        }
+      })
+    );
+
+    await Promise.all(postCommitTasks);
+
+    res.json({
+      success: true,
+      invoiceNumber: result.invoiceNumber,
+      rewardPoints: result.rewardPoints,
+      discountAmount,
+      totalAmount
+    });
+
+  } catch (err: any) {
+    if (err instanceof Error) {
+      if (err.message.startsWith('Khong du ton FEFO')) {
+        return res.status(409).json({ error: err.message });
+      }
+
+      if (err.message.startsWith('Không tìm thấy SKU thuốc')) {
+        return res.status(404).json({ error: err.message });
+      }
+
+      if (err.message.includes('khong hop le')) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
+    return respondWithDatabaseAwareError(res, err, 'Internal server error during checkout');
+  }
+});
+
+// 2. Lấy danh sách lịch sử Toa thuốc (Prescriptions)
+router.get('/prescriptions', authenticateJWT, requirePermission('prescription.verify'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const prescriptions = await prisma.prescription.findMany({
+      include: { items: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(prescriptions);
+  } catch (err: any) {
+    return respondWithDatabaseAwareError(res, err, 'Internal server error fetching prescriptions');
+  }
+});
+
+// 3. Lấy danh sách lịch sử Hóa đơn (SalesOrders) kèm chi tiết và đơn thuốc đối chiếu
+router.get('/invoices', authenticateJWT, requirePermission('sales.view'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { branchId, startDate, endDate, search } = req.query;
+    const userRole = req.user?.role;
+    const userBranchId = req.user?.branchId;
+
+    // Phân quyền theo chi nhánh
+    let branchFilter: any = {};
+    if (userRole !== 'ROLE_ADMIN' && userRole !== 'ROLE_CHAIN_MANAGER') {
+      if (!userBranchId) {
+        return res.status(403).json({ error: 'User does not belong to any branch to view invoices' });
+      }
+      branchFilter = { branchId: userBranchId };
+    } else if (branchId && branchId !== 'all') {
+      branchFilter = { branchId: String(branchId) };
+    }
+
+    // Lọc theo ngày
+    let dateFilter: any = {};
+    if (startDate || endDate) {
+      dateFilter.saleDate = {};
+      if (startDate) {
+        dateFilter.saleDate.gte = new Date(String(startDate));
+      }
+      if (endDate) {
+        const end = new Date(String(endDate));
+        end.setHours(23, 59, 59, 999);
+        dateFilter.saleDate.lte = end;
+      }
+    }
+
+    // Tìm kiếm nhanh (Invoice Number, Customer, Cashier)
+    let searchFilter: any = {};
+    if (search) {
+      const searchStr = String(search);
+      searchFilter = {
+        OR: [
+          { invoiceNumber: { contains: searchStr, mode: 'insensitive' } },
+          { customerId: { contains: searchStr, mode: 'insensitive' } },
+          { cashierName: { contains: searchStr, mode: 'insensitive' } },
+        ]
+      };
+    }
+
+    const invoices = await prisma.salesOrder.findMany({
+      where: {
+        ...branchFilter,
+        ...dateFilter,
+        ...searchFilter,
+      },
+      include: {
+        items: true,
+        branch: {
+          select: {
+            name: true,
+            code: true,
+          }
+        }
+      },
+      orderBy: { saleDate: 'desc' }
+    });
+
+    // Đối với mỗi hóa đơn có prescriptionId, chúng ta nạp thêm thông tin Prescription
+    const invoicesWithPrescriptions = await Promise.all(
+      invoices.map(async (invoice) => {
+        if (invoice.prescriptionId) {
+          const prescription = await prisma.prescription.findUnique({
+            where: { prescriptionNumber: invoice.prescriptionId },
+            include: { items: true }
+          });
+          return {
+            ...invoice,
+            prescription
+          };
+        }
+        return invoice;
+      })
+    );
+
+    res.json(invoicesWithPrescriptions);
+  } catch (err: any) {
+    return respondWithDatabaseAwareError(res, err, 'Internal server error fetching invoices');
+  }
+});
+
+// 4. Lấy chi tiết một Hóa đơn (SalesOrder) theo ID
+router.get('/invoices/:id', authenticateJWT, requirePermission('sales.view'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userRole = req.user?.role;
+    const userBranchId = req.user?.branchId;
+
+    const invoice = await prisma.salesOrder.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        branch: {
+          select: {
+            name: true,
+            code: true,
+          }
+        }
+      }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ error: 'Không tìm thấy hóa đơn này.' });
+    }
+
+    // Kiểm tra quyền truy cập theo chi nhánh
+    if (userRole !== 'ROLE_ADMIN' && userRole !== 'ROLE_CHAIN_MANAGER' && invoice.branchId !== userBranchId) {
+      return res.status(403).json({ error: 'Bạn không có quyền xem hóa đơn của chi nhánh khác.' });
+    }
+
+    // Nếu có đơn thuốc kèm theo, nạp đầy đủ thông tin Prescription
+    let prescription = null;
+    if (invoice.prescriptionId) {
+      prescription = await prisma.prescription.findUnique({
+        where: { prescriptionNumber: invoice.prescriptionId },
+        include: { items: true }
+      });
+    }
+
+    res.json({
+      ...invoice,
+      prescription
+    });
+  } catch (err: any) {
+    return respondWithDatabaseAwareError(res, err, 'Internal server error fetching invoice detail');
+  }
+});
+
+export default router;

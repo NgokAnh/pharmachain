@@ -1,0 +1,410 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ROLE_ADMIN
+  ROLE_CHAIN_MANAGER
+  ROLE_BRANCH_MANAGER
+  ROLE_PHARMACIST
+  ROLE_WAREHOUSE_STAFF
+}
+
+enum MedicineSaleCategory {
+  PRESCRIPTION
+  OTC
+  NON_DRUG
+}
+
+enum PriceChannel {
+  POS
+  ONLINE
+  WHOLESALE
+}
+
+enum StockStatus {
+  QUARANTINE
+  AVAILABLE
+  RESERVED
+  IN_TRANSIT
+  BLOCKED
+  RECALLED
+  EXPIRED
+  DAMAGED
+  DESTROYED
+  RETURNED_SUPPLIER
+}
+
+enum InventoryTransactionType {
+  RECEIPT
+  SALE
+  RESERVE
+  RELEASE_RESERVE
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  STATUS_TRANSFER
+  TRANSFER_IN
+  TRANSFER_OUT
+  RECALL
+  DAMAGE
+  EXPIRE
+  DESTROY
+  RETURN_TO_SUPPLIER
+}
+
+model Branch {
+  id                    String                 @id @default(uuid())
+  code                  String                 @unique
+  name                  String
+  address               String
+  phone                 String
+  email                 String
+  status                String                 @default("active")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  users                 User[]
+  inventoryLots         InventoryLot[]
+  inventoryTransactions InventoryTransaction[]
+  salesOrders           SalesOrder[]
+  transfersFrom         StockTransfer[]        @relation("TransfersFrom")
+  transfersTo           StockTransfer[]        @relation("TransfersTo")
+  inventoryChecks       InventoryCheck[]
+  medicinePrices        MedicinePrice[]
+}
+
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  name      String
+  email     String   @unique
+  role      UserRole
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Medicine {
+  id                         String                 @id @default(uuid())
+  code                       String                 @unique
+  registrationNumber         String?
+  name                       String
+  categoryId                 String?
+  category                   Category?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  supplierId                 String?
+  supplier                   Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  activeIngredient           String
+  strength                   String
+  dosageForm                 String
+  packagingSpec              String
+  unit                       String
+  unitConversionNote         String?
+  barcode                    String?                @unique
+  manufacturer               String
+  countryOfOrigin            String
+  description                String?
+  status                     String                 @default("active")
+  saleCategory               MedicineSaleCategory   @default(OTC)
+  isPrescriptionRequired     Boolean                @default(false)
+  sellPrice                  Float
+  defaultCostPrice           Float?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+
+
+  inventoryLots              InventoryLot[]
+  inventoryTransactions      InventoryTransaction[]
+  unitConversions            MedicineUnitConversion[]
+  priceHistories             MedicinePrice[]
+}
+
+model MedicineUnitConversion {
+  id             String   @id @default(uuid())
+  medicineId     String
+  medicine       Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  fromUnit       String
+  toUnit         String
+  conversionRate Float
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([medicineId, fromUnit, toUnit])
+}
+
+model MedicinePrice {
+  id           String       @id @default(uuid())
+  medicineId   String
+  medicine     Medicine     @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?      @relation(fields: [branchId], references: [id])
+  channel      PriceChannel @default(POS)
+  price        Float
+  priceProgram String?
+  effectiveFrom String
+  effectiveTo   String?
+  changeReason  String?
+  changedBy     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model InventoryLot {
+  id                String               @id @default(uuid())
+  medicineId        String
+  medicine          Medicine             @relation(fields: [medicineId], references: [id])
+  branchId          String
+  branch            Branch               @relation(fields: [branchId], references: [id])
+  lotNumber         String
+  manufacturingDate String?
+  expiryDate        String
+  receivedDate      String
+  supplierName      String
+  inboundDocumentNo String?
+  status            StockStatus          @default(AVAILABLE)
+  costPrice         Float
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  inventoryTransactions InventoryTransaction[]
+
+  @@unique([branchId, medicineId, lotNumber, expiryDate])
+}
+
+model InventoryTransaction {
+  id                String                   @id @default(uuid())
+  medicineId        String
+  medicine          Medicine                 @relation(fields: [medicineId], references: [id])
+  inventoryLotId    String
+  inventoryLot      InventoryLot             @relation(fields: [inventoryLotId], references: [id], onDelete: Cascade)
+  branchId          String
+  branch            Branch                   @relation(fields: [branchId], references: [id])
+  stockStatus       StockStatus
+  transactionType   InventoryTransactionType
+  quantity          Int
+  referenceType     String
+  referenceId       String?
+  referenceNumber   String?
+  createdByUserId   String?
+  createdByUserName String?
+  notes             String?
+  transactedAt      DateTime                 @default(now())
+  createdAt         DateTime                 @default(now())
+
+  @@index([branchId, medicineId, stockStatus, transactedAt])
+  @@index([inventoryLotId, stockStatus, transactedAt])
+}
+
+model Customer {
+  id             String         @id @default(uuid())
+  code           String         @unique
+  name           String
+  phone          String         @unique
+  email          String?
+  dateOfBirth    String?
+  address        String?
+  membershipTier String         @default("bronze")
+  points         Int            @default(0)
+  status         String         @default("active")
+  joinDate       String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  salesOrders    SalesOrder[]
+  prescriptions  Prescription[]
+}
+
+model Prescription {
+  id                 String   @id @default(uuid())
+  prescriptionNumber String   @unique
+  customerId         String?
+  customer           Customer? @relation(fields: [customerId], references: [id])
+  doctorName         String
+  prescriptionDate   String
+  imageUrl           String?  @db.Text
+  status             String   @default("pending")
+  verifiedBy         String?
+  verifiedDate       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  items PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id             String       @id @default(uuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineName   String
+  quantity       Int
+  dosage         String
+  frequency      String
+  duration       String
+}
+
+model SalesOrder {
+  id             String   @id @default(uuid())
+  invoiceNumber  String   @unique
+  branchId       String
+  branch         Branch   @relation(fields: [branchId], references: [id])
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id])
+  cashierId      String
+  cashierName    String
+  saleDate       DateTime @default(now())
+  subtotal       Float
+  discount       Float
+  total          Float
+  paymentMethod  String
+  status         String   @default("completed")
+  prescriptionId String?
+  pointsEarned   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items SalesOrderItem[]
+}
+
+model SalesOrderItem {
+  id           String     @id @default(uuid())
+  salesOrderId String
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  medicineId   String
+  medicineName String
+  lotNumber    String
+  quantity     Int
+  unitPrice    Float
+  discount     Float
+  totalPrice   Float
+  dosage       String?
+  frequency    String?
+  duration     String?
+}
+
+model StockTransfer {
+  id             String   @id @default(uuid())
+  transferNumber String   @unique
+  fromBranchId   String
+  fromBranch     Branch   @relation("TransfersFrom", fields: [fromBranchId], references: [id])
+  toBranchId     String
+  toBranch       Branch   @relation("TransfersTo", fields: [toBranchId], references: [id])
+  requestDate    String
+  status         String   @default("pending")
+  requestedBy    String
+  approvedBy     String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items StockTransferItem[]
+}
+
+model StockTransferItem {
+  id               String        @id @default(uuid())
+  transferId       String
+  transfer         StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  medicineId       String
+  medicineName     String
+  lotNumber        String
+  quantity         Int
+  receivedQuantity Int?
+}
+
+model InventoryCheck {
+  id          String   @id @default(uuid())
+  checkNumber String   @unique
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  status      String   @default("pending")
+  createdBy   String
+  approvedBy  String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       InventoryCheckItem[]
+}
+
+model InventoryCheckItem {
+  id             String         @id @default(uuid())
+  checkId        String
+  check          InventoryCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+  medicineId     String
+  medicineName   String
+  lotNumber      String
+  systemQuantity Int
+  actualQuantity Int
+  difference     Int
+  reason         String?
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  timestamp  DateTime @default(now())
+  userId     String
+  userName   String
+  action     String
+  entityType String
+  entityId   String
+  details    String   @db.Text
+  ipAddress  String?
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  name        String     @unique
+  description String?
+  status      String     @default("active")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  medicines   Medicine[]
+}
+
+model Supplier {
+  id            String     @id @default(uuid())
+  code          String     @unique
+  name          String     @unique
+  contactPerson String
+  phone         String
+  email         String
+  address       String
+  status        String     @default("active")
+  taxCode       String?
+  bankAccount   String?
+  bankName      String?
+  paymentTerms  String?    @default("30")
+  notes         String?    @db.Text
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  medicines     Medicine[]
+}
+
+model Promotion {
+  id           String   @id
+  code         String   @unique
+  name         String
+  value        Float
+  status       String   @default("active")
+  type         String
+  description  String
+  usages       Int      @default(0)
+  totalSavings Float    @default(0)
+  targetBranch String   @default("all")
+  config       String?  @db.Text
+  startDate    String?
+  endDate      String?
+  targetGroup  String   @default("all")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

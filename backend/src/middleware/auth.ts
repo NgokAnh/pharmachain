@@ -49,7 +49,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'purchasing.create', 'purchasing.approve', 'purchasing.receive',
     'inventory.view', 'inventory.stocktake', 'inventory.adjust', 'inventory.batch.manage',
     'transfer.create', 'transfer.approve', 'sales.view', 'sales.cancel',
-    'customer.view', 'customer.manage', 'report.view_branch', 'report.view_chain', 'audit.view',
+    'customer.view', 'customer.manage', 'report.view_branch', 'report.view_chain', 'user.view',
     'promotion.view', 'promotion.manage'
   ],
   ROLE_BRANCH_MANAGER: [
@@ -70,7 +70,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   ]
 };
 
-export function requirePermission(permission: string) {
+export function requirePermission(permission: string | string[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'User is not authenticated' });
@@ -79,7 +79,11 @@ export function requirePermission(permission: string) {
     const userRole = req.user.role;
     const permissions = ROLE_PERMISSIONS[userRole] || [];
 
-    if (permissions.includes(permission)) {
+    const hasPermission = Array.isArray(permission)
+      ? permission.some(p => permissions.includes(p))
+      : permissions.includes(permission);
+
+    if (hasPermission) {
       next();
     } else {
       res.status(403).json({ error: `User does not have required permission: ${permission}` });

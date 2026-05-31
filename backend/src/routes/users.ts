@@ -6,7 +6,7 @@ import { prisma, respondWithDatabaseAwareError } from '../lib/prisma';
 const router = Router();
 
 // 1. List / Search Users
-router.get('/', authenticateJWT, requirePermission('user.manage'), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', authenticateJWT, requirePermission(['user.manage', 'user.view']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { search } = req.query;
 
@@ -47,7 +47,7 @@ router.get('/', authenticateJWT, requirePermission('user.manage'), async (req: A
 });
 
 // 2. Get User Detail
-router.get('/:id', authenticateJWT, requirePermission('user.manage'), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id', authenticateJWT, requirePermission(['user.manage', 'user.view']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
 

@@ -7,6 +7,7 @@ import {
   DATABASE_UNAVAILABLE_MESSAGE,
   isDatabaseConnectionError,
 } from './lib/prisma';
+import { initSchedulers } from './services/cron';
 
 // Import routers
 import authRouter from './routes/auth';
@@ -70,6 +71,10 @@ app.listen(PORT as number, '0.0.0.0', () => {
   console.log(`🚀  PharmaChain Backend listening on port ${PORT}`);
   console.log(`🔗  Endpoint URL: http://localhost:${PORT}`);
   console.log(`=================================================`);
+
+  // Start Cronjobs
+  initSchedulers();
+  console.log(`⏰  Cronjobs initialized`);
 
   void checkDatabaseConnection()
     .then(() => {

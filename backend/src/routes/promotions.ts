@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticateJWT, AuthenticatedRequest, requirePermission } from '../middleware/auth';
 import { prisma, respondWithDatabaseAwareError } from '../lib/prisma';
 import { randomUUID } from 'crypto';
+import { systemCache } from '../lib/cache';
 
 const router = Router();
 
@@ -35,10 +36,24 @@ router.get('/', authenticateJWT, async (req: AuthenticatedRequest, res: Response
       filter.type = String(type);
     }
 
+    // 2. Performance: Đọc từ Cache nếu không search
+    const cacheKey = `promotions_list_${status}_${type}`;
+    if (!search) {
+      const cachedData = systemCache.get(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
+    }
+
     const promotions = await prisma.promotion.findMany({
       where: filter,
       orderBy: { createdAt: 'desc' },
     });
+
+    // Lưu vào Cache
+    if (!search) {
+      systemCache.set(cacheKey, promotions);
+    }
 
     res.json(promotions);
   } catch (err: any) {
@@ -86,6 +101,18 @@ router.post('/', authenticateJWT, requirePermission('promotion.manage'), async (
       return res.status(400).json({ error: 'Mã, tên và loại khuyến mãi là thông tin bắt buộc.' });
     }
 
+    // 1. Security (Input Validation): Kiểm tra đầu vào
+    const parsedValue = value ? parseFloat(value) : 0;
+    if (type === 'percent' || type === 'percent_discount') {
+      if (parsedValue <= 0 || parsedValue > 100) {
+        return res.status(400).json({ error: 'Phần trăm giảm giá phải nằm trong khoảng từ 0 đến 100%.' });
+      }
+    } else if (type === 'fixed' || type === 'fixed_discount') {
+      if (parsedValue <= 0) {
+        return res.status(400).json({ error: 'Số tiền giảm giá phải lớn hơn 0.' });
+      }
+    }
+
     // Check duplicate code
     const existingCode = await prisma.promotion.findUnique({
       where: { code }
@@ -124,6 +151,9 @@ router.post('/', authenticateJWT, requirePermission('promotion.manage'), async (
         details: `Đã tạo chương trình khuyến mãi mới: "${name}" (${code}), loại: ${type}.`,
       }
     });
+
+    // Invalidate Cache
+    systemCache.clearAll();
 
     res.status(201).json(promotion);
   } catch (err: any) {
@@ -166,6 +196,20 @@ router.put('/:id', authenticateJWT, requirePermission('promotion.manage'), async
       }
     }
 
+    // 1. Security (Input Validation): Kiểm tra đầu vào
+    const checkType = type || existingPromotion.type;
+    const parsedValue = value !== undefined ? parseFloat(value) : existingPromotion.value;
+    
+    if (checkType === 'percent' || checkType === 'percent_discount') {
+      if (parsedValue <= 0 || parsedValue > 100) {
+        return res.status(400).json({ error: 'Phần trăm giảm giá phải nằm trong khoảng từ 0 đến 100%.' });
+      }
+    } else if (checkType === 'fixed' || checkType === 'fixed_discount') {
+      if (parsedValue <= 0) {
+        return res.status(400).json({ error: 'Số tiền giảm giá phải lớn hơn 0.' });
+      }
+    }
+
     const updatedPromotion = await prisma.promotion.update({
       where: { id },
       data: {
@@ -194,6 +238,9 @@ router.put('/:id', authenticateJWT, requirePermission('promotion.manage'), async
         details: `Cập nhật chương trình khuyến mãi: "${updatedPromotion.name}" (${updatedPromotion.code}).`,
       }
     });
+
+    // Invalidate Cache
+    systemCache.clearAll();
 
     res.json(updatedPromotion);
   } catch (err: any) {
@@ -236,6 +283,9 @@ router.delete('/:id', authenticateJWT, requirePermission('promotion.manage'), as
         details: `Xóa chương trình khuyến mãi: "${promotion.name}" (${promotion.code}).`,
       }
     });
+
+    // Invalidate Cache
+    systemCache.clearAll();
 
     res.json({ message: 'Xóa chương trình khuyến mãi thành công.' });
   } catch (err: any) {

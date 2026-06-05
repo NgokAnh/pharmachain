@@ -9,6 +9,9 @@ import {
   ComboStrategy,
   PointRewardStrategy,
   DefaultStrategy,
+  BuyGiftStrategy,
+  ConditionFixedDiscountStrategy,
+  TierPercentDiscountStrategy,
   Order as PromoOrder,
 } from '../strategies/promotions';
 import {
@@ -225,6 +228,16 @@ router.post('/checkout', authenticateJWT, requirePermission('sales.create'), asy
           break;
         case 'vip_points':
           calculator.setStrategy(new PointRewardStrategy());
+          break;
+        case 'buy_1_get_1':
+          const giftMed = await prisma.medicine.findFirst({ where: { code: 'MED0001' } });
+          calculator.setStrategy(new BuyGiftStrategy(giftMed?.id || 'med-1', 1, giftMed?.id || 'med-1', 1));
+          break;
+        case 'min_order_50':
+          calculator.setStrategy(new ConditionFixedDiscountStrategy(50, customPromoValue ?? 10));
+          break;
+        case 'platinum_15':
+          calculator.setStrategy(new TierPercentDiscountStrategy('platinum', customPromoValue ?? 15));
           break;
         default:
           calculator.setStrategy(new DefaultStrategy());

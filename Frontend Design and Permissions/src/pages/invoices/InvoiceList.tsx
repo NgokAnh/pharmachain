@@ -28,8 +28,10 @@ import {
   Image as ImageIcon,
   Building,
   CheckCircle,
+  CloudOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getOfflineOrders } from '../../utils/offlineStore';
 
 interface SalesOrderItem {
   id: string;
@@ -139,37 +141,97 @@ export function InvoiceList() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      if (!token) return;
-
-      const params = new URLSearchParams();
-      if (branchFilter && branchFilter !== 'all') {
-        params.append('branchId', branchFilter);
-      }
-      if (startDate) {
-        params.append('startDate', startDate);
-      }
-      if (endDate) {
-        params.append('endDate', endDate);
-      }
-      if (search) {
-        params.append('search', search);
-      }
-
-      const response = await fetch(`http://localhost:3000/api/pos/invoices?${params.toString()}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      
+      let onlineData: Invoice[] = [];
+      if (token) {
+        const params = new URLSearchParams();
+        if (branchFilter && branchFilter !== 'all') {
+          params.append('branchId', branchFilter);
         }
-      });
+        if (startDate) {
+          params.append('startDate', startDate);
+        }
+        if (endDate) {
+          params.append('endDate', endDate);
+        }
+        if (search) {
+          params.append('search', search);
+        }
 
-      if (response.ok) {
-        const data = await response.json();
-        setInvoices(data);
-      } else {
-        toast.error('Không thể tải danh sách hóa đơn.');
+        try {
+          const response = await fetch(`http://localhost:3000/api/pos/invoices?${params.toString()}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (response.ok) {
+            onlineData = await response.json();
+          } else {
+            console.warn('Không thể tải danh sách hóa đơn từ server.');
+          }
+        } catch (e) {
+          console.warn('Lỗi kết nối API, có thể đang ngoại tuyến.');
+        }
       }
+
+      // Fetch offline orders
+      try {
+        const offlineOrders = await getOfflineOrders();
+        const mappedOffline: Invoice[] = offlineOrders.map(order => {
+          const p = order.payload;
+          const subtotal = p.cart.reduce((sum: number, item: any) => sum + (item.total || 0), 0);
+          
+          return {
+            id: order.id,
+            invoiceNumber: `INV-OFF-${order.timestamp.toString().slice(-6)}`,
+            branchId: p.branchId || '',
+            customerId: p.customerId,
+            cashierId: user?.id || 'offline',
+            cashierName: user?.name || 'Bạn',
+            saleDate: new Date(order.timestamp).toISOString(),
+            subtotal: subtotal,
+            discount: 0,
+            total: subtotal,
+            paymentMethod: p.paymentMethod,
+            status: 'OFFLINE_PENDING',
+            prescriptionId: p.prescriptionId,
+            createdAt: new Date(order.timestamp).toISOString(),
+            items: p.cart.map((c: any) => ({
+              id: c.id,
+              medicineId: c.medicineId,
+              medicineName: c.name,
+              lotNumber: c.lotNumber,
+              quantity: c.quantity,
+              unitPrice: c.price,
+              discount: c.discount || 0,
+              totalPrice: c.total,
+              dosage: c.dosage,
+              frequency: c.frequency,
+              duration: c.duration,
+            })),
+            branch: { name: 'Chờ đồng bộ...', code: 'OFF' }
+          };
+        });
+        
+        // Filter offline orders locally based on search
+        let filteredOffline = mappedOffline;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredOffline = mappedOffline.filter(inv => 
+            inv.invoiceNumber.toLowerCase().includes(searchLower) ||
+            inv.customerId?.toLowerCase().includes(searchLower)
+          );
+        }
+
+        setInvoices([...filteredOffline, ...onlineData]);
+      } catch (err) {
+        console.error('Lỗi lấy hóa đơn offline:', err);
+        setInvoices(onlineData);
+      }
+      
     } catch (err) {
       console.error('Error fetching invoices:', err);
-      toast.error('Lỗi kết nối máy chủ API!');
     } finally {
       setIsLoading(false);
     }
@@ -521,10 +583,21 @@ export function InvoiceList() {
                   return (
                     <TableRow key={invoice.id} className="hover:bg-muted/10">
                       <TableCell className="font-mono text-sm font-semibold text-primary">
-                        {invoice.invoiceNumber}
+                        {invoice.status === 'OFFLINE_PENDING' ? (
+                          <div className="flex items-center gap-1.5 text-warning">
+                            <CloudOff className="h-4 w-4" />
+                            {invoice.invoiceNumber}
+                          </div>
+                        ) : (
+                          invoice.invoiceNumber
+                        )}
                       </TableCell>
                       <TableCell className="font-medium text-foreground">
-                        {invoice.branch?.name || 'Chi nhánh mặc định'}
+                        {invoice.status === 'OFFLINE_PENDING' ? (
+                          <span className="italic text-muted-foreground">{invoice.branch?.name}</span>
+                        ) : (
+                          invoice.branch?.name || 'Chi nhánh mặc định'
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">

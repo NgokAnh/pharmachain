@@ -6,8 +6,9 @@ import { Input } from '../../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Select } from '../../components/ui/Select';
-import { Trash2, ShoppingCart, Barcode, Camera, Upload, Check, AlertTriangle, ShieldCheck, FileText, RefreshCw, Search, UserPlus, X, Users, Store, Gift, Plus } from 'lucide-react';
+import { Trash2, ShoppingCart, Barcode, Camera, Upload, Check, AlertTriangle, ShieldCheck, FileText, RefreshCw, Search, UserPlus, X, Users, Store, Gift, Plus, WifiOff, Wifi, CloudOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { saveOfflineOrder, getOfflineOrders, removeOfflineOrder, getOfflineOrdersCount } from '../../utils/offlineStore';
 import { InventoryLine, Customer } from '../../types';
 import {
   buildConversionSummary,
@@ -162,6 +163,11 @@ export function POS() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
   const [prescriptionId, setPrescriptionId] = useState('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  
+  // Offline Sync State
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Dynamic medicines list loaded from branch inventory
   const [medicines, setMedicines] = useState<AvailableMedicine[]>([]);
@@ -333,6 +339,69 @@ export function POS() {
     return () => controller.abort();
   }, [selectedBranchId]);
 
+  // Offline Sync Effect
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial check
+    getOfflineOrdersCount().then(setPendingSyncCount).catch(console.error);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const syncOfflineOrders = async () => {
+    if (isSyncing || pendingSyncCount === 0 || isOffline) return;
+    
+    setIsSyncing(true);
+    let successCount = 0;
+    try {
+      const orders = await getOfflineOrders();
+      const token = localStorage.getItem('pharmacy_token');
+      
+      for (const order of orders) {
+        try {
+          const response = await fetch('http://localhost:3000/api/pos/checkout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(order.payload)
+          });
+
+          if (response.ok) {
+            await removeOfflineOrder(order.id);
+            successCount++;
+          }
+        } catch (e) {
+          console.error('Lỗi khi đồng bộ đơn hàng:', e);
+        }
+      }
+    } finally {
+      setIsSyncing(false);
+      const remainingCount = await getOfflineOrdersCount();
+      setPendingSyncCount(remainingCount);
+      if (successCount > 0) {
+        toast.success(`Đã đồng bộ thành công ${successCount} đơn hàng ngoại tuyến!`);
+        loadAvailableMedicines(undefined, false); // Reload inventory
+      }
+    }
+  };
+
+  // Auto-sync when coming back online
+  useEffect(() => {
+    if (!isOffline && pendingSyncCount > 0) {
+      syncOfflineOrders();
+    }
+  }, [isOffline, pendingSyncCount]);
+
   // Load branches if user is Admin/Chain Manager
   const isAdminOrChainManager = user?.role === 'ROLE_ADMIN' || user?.role === 'ROLE_CHAIN_MANAGER';
   useEffect(() => {
@@ -409,6 +478,7 @@ export function POS() {
   };
 
   // Strategy Pattern States
+  const [isAutoPromo, setIsAutoPromo] = useState<boolean>(true);
   const [promoType, setPromoType] = useState<string>('default');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [rewardPoints, setRewardPoints] = useState(0);
@@ -461,7 +531,10 @@ export function POS() {
         { id: 'percent_10', code: 'percent_10', name: 'Chiết khấu 10% tổng hóa đơn', value: 10, status: 'active', type: 'percent', targetBranch: 'all' },
         { id: 'fixed_20', code: 'fixed_20', name: 'Giảm thẳng $20 trực tiếp', value: 20, status: 'active', type: 'fixed', targetBranch: 'all' },
         { id: 'combo_para', code: 'combo_para', name: 'Combo Paracetamol (Giảm thêm $5)', value: 5, status: 'active', type: 'combo', targetBranch: 'all' },
-        { id: 'vip_points', code: 'vip_points', name: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)', value: 2, status: 'active', type: 'loyalty', targetBranch: 'all' }
+        { id: 'vip_points', code: 'vip_points', name: 'Nhân hệ số điểm VIP (Bạc/Vàng/Bạch Kim)', value: 2, status: 'active', type: 'loyalty', targetBranch: 'all' },
+        { id: 'buy_1_get_1', code: 'buy_1_get_1', name: 'Mua 1 tặng 1 Paracetamol', value: 0, status: 'active', type: 'buy_gift', targetBranch: 'all' },
+        { id: 'min_order_50', code: 'min_order_50', name: 'Giảm $10 cho đơn từ $50', value: 10, status: 'active', type: 'fixed', targetBranch: 'all' },
+        { id: 'platinum_15', code: 'platinum_15', name: 'Giảm 15% hạng Platinum', value: 15, status: 'active', type: 'percent', targetBranch: 'all' }
       ];
       setPromotions(defaultPromos);
       localStorage.setItem('pharmachain_promotions', JSON.stringify(defaultPromos));
@@ -520,156 +593,204 @@ export function POS() {
       customerTier,
     };
 
-    let discount = 0;
-    let points = Math.floor(subtotal / 10); // default points
+    const calculatePromoEffect = (pType: string) => {
+      let calcDiscount = 0;
+      let calcPoints = Math.floor(subtotal / 10);
+      let isDbPromo = false;
 
-    let dbPromoApplied = false;
-    if (promoType && promoType !== 'default') {
-      const promotion = promotions.find(p => p.id === promoType);
-      if (promotion && promotion.status === 'active') {
-        try {
-          const config = promotion.config ? (typeof promotion.config === 'string' ? JSON.parse(promotion.config) : promotion.config) : {};
-          dbPromoApplied = true;
+      const presetIds = ['default', 'percent_10', 'fixed_20', 'combo_para', 'vip_points', 'buy_1_get_1', 'min_order_50', 'platinum_15'];
+      const isPreset = presetIds.includes(pType);
 
-          switch (promotion.type) {
-            case 'percent_discount':
-            case 'percent': {
-              const minOrder = Number(config.minOrderValue || 0);
-              const pct = Number(promotion.value || config.percent || 0);
-              if (subtotal >= minOrder) {
-                discount = subtotal * (pct / 100);
-              }
-              break;
-            }
-            case 'fixed_discount':
-            case 'fixed': {
-              const minOrder = Number(config.minOrderValue || 0);
-              const amt = Number(promotion.value || config.amount || 0);
-              if (subtotal >= minOrder) {
-                discount = Math.min(amt, subtotal);
-              }
-              break;
-            }
-            case 'buy_gift':
-            case 'combo': {
-              const buyMedId = config.buyMedicineId;
-              const giftMedId = config.giftMedicineId;
-              const buyQty = Number(config.buyQuantity || 1);
-              const giftQty = Number(config.giftQuantity || 1);
-              const buyUnit = config.buyUnit;
-              const giftUnit = config.giftUnit;
+      if (pType && !isPreset) {
+        const promotion = promotions.find(p => p.id === pType);
+        if (promotion && promotion.status === 'active') {
+          try {
+            const config = promotion.config ? (typeof promotion.config === 'string' ? JSON.parse(promotion.config) : promotion.config) : {};
+            isDbPromo = true;
 
-              if (buyMedId && giftMedId) {
-                const buyMed = medicines.find(m => m.id === buyMedId);
-                const buyUnitOpt = buyMed?.sellUnits?.find(u => u.value === buyUnit);
-                const buyFactor = buyUnitOpt ? buyUnitOpt.factorToBase : 1;
-
-                const buyItems = cart.filter(i => i.medicineId === buyMedId);
-                const totalBuyBaseQty = buyItems.reduce((sum, i) => sum + i.quantity * (i.conversionFactor || 1), 0);
-                const purchasedBuyQty = totalBuyBaseQty / buyFactor;
-
-                if (purchasedBuyQty >= buyQty) {
-                  const timesQualified = Math.floor(purchasedBuyQty / buyQty);
-                  const giftMed = medicines.find(m => m.id === giftMedId);
-                  const giftUnitOpt = giftMed?.sellUnits?.find(u => u.value === giftUnit);
-                  const giftFactor = giftUnitOpt ? giftUnitOpt.factorToBase : 1;
-                  const totalQualifiedGiftBaseQty = timesQualified * giftQty * giftFactor;
-
-                  let remainingGiftBaseQtyToDiscount = totalQualifiedGiftBaseQty;
-                  let comboDiscount = 0;
-                  const giftItemsInCart = cart.filter(i => i.medicineId === giftMedId);
-                  
-                  for (const item of giftItemsInCart) {
-                    if (remainingGiftBaseQtyToDiscount <= 0) break;
-                    const itemBaseQty = item.quantity * (item.conversionFactor || 1);
-                    const discountBaseQty = Math.min(itemBaseQty, remainingGiftBaseQtyToDiscount);
-                    const itemBasePrice = item.price / (item.conversionFactor || 1);
-                    comboDiscount += discountBaseQty * itemBasePrice;
-                    remainingGiftBaseQtyToDiscount -= discountBaseQty;
-                  }
-                  discount = comboDiscount;
+            switch (promotion.type) {
+              case 'percent_discount':
+              case 'percent': {
+                const minOrder = Number(config.minOrderValue || 0);
+                const pct = Number(promotion.value || config.percent || 0);
+                if (subtotal >= minOrder) {
+                  calcDiscount = subtotal * (pct / 100);
                 }
+                break;
               }
-              break;
-            }
-            case 'loyalty_points':
-            case 'loyalty': {
-              let multiplier = 1.0;
-              const silverMult = Number(config.silverMultiplier ?? 1.2);
-              const goldMult = Number(config.goldMultiplier ?? 1.5);
-              const platMult = Number(config.platinumMultiplier ?? 2.0);
+              case 'fixed_discount':
+              case 'fixed': {
+                const minOrder = Number(config.minOrderValue || 0);
+                const amt = Number(promotion.value || config.amount || 0);
+                if (subtotal >= minOrder) {
+                  calcDiscount = Math.min(amt, subtotal);
+                }
+                break;
+              }
+              case 'buy_gift':
+              case 'combo': {
+                const buyMedId = config.buyMedicineId;
+                const giftMedId = config.giftMedicineId;
+                const buyQty = Number(config.buyQuantity || 1);
+                const giftQty = Number(config.giftQuantity || 1);
+                const buyUnit = config.buyUnit;
+                const giftUnit = config.giftUnit;
 
-              if (customerTier === 'silver') multiplier = silverMult;
-              if (customerTier === 'gold') multiplier = goldMult;
-              if (customerTier === 'platinum') multiplier = platMult;
+                if (buyMedId && giftMedId) {
+                  const buyMed = medicines.find(m => m.id === buyMedId);
+                  const buyUnitOpt = buyMed?.sellUnits?.find(u => u.value === buyUnit);
+                  const buyFactor = buyUnitOpt ? buyUnitOpt.factorToBase : 1;
 
-              const finalTotal = Math.max(0, subtotal - discount);
-              const basePoints = Math.floor(finalTotal / 10);
-              points = Math.floor(basePoints * multiplier);
-              break;
-            }
-            case 'category_voucher': {
-              const catId = config.categoryId;
-              const discType = config.discountType || 'percent';
-              const discVal = Number(config.discountValue || promotion.value || 0);
+                  const buyItems = cart.filter(i => i.medicineId === buyMedId);
+                  const totalBuyBaseQty = buyItems.reduce((sum, i) => sum + i.quantity * (i.conversionFactor || 1), 0);
+                  const purchasedBuyQty = totalBuyBaseQty / buyFactor;
 
-              if (catId) {
-                const catSubtotal = cart
-                  .filter(item => {
-                    const matchMed = medicines.find(m => m.id === item.medicineId);
-                    return matchMed && matchMed.categoryId === catId;
-                  })
-                  .reduce((sum, item) => sum + item.price * item.quantity, 0);
+                  if (purchasedBuyQty >= buyQty) {
+                    const timesQualified = Math.floor(purchasedBuyQty / buyQty);
+                    const giftMed = medicines.find(m => m.id === giftMedId);
+                    const giftUnitOpt = giftMed?.sellUnits?.find(u => u.value === giftUnit);
+                    const giftFactor = giftUnitOpt ? giftUnitOpt.factorToBase : 1;
+                    const totalQualifiedGiftBaseQty = timesQualified * giftQty * giftFactor;
 
-                if (catSubtotal > 0) {
-                  if (discType === 'percent') {
-                    discount = catSubtotal * (discVal / 100);
-                  } else {
-                    discount = Math.min(discVal, catSubtotal);
+                    let remainingGiftBaseQtyToDiscount = totalQualifiedGiftBaseQty;
+                    let comboDiscount = 0;
+                    const giftItemsInCart = cart.filter(i => i.medicineId === giftMedId);
+                    
+                    for (const item of giftItemsInCart) {
+                      if (remainingGiftBaseQtyToDiscount <= 0) break;
+                      const itemBaseQty = item.quantity * (item.conversionFactor || 1);
+                      const discountBaseQty = Math.min(itemBaseQty, remainingGiftBaseQtyToDiscount);
+                      const itemBasePrice = item.price / (item.conversionFactor || 1);
+                      comboDiscount += discountBaseQty * itemBasePrice;
+                      remainingGiftBaseQtyToDiscount -= discountBaseQty;
+                    }
+                    calcDiscount = comboDiscount;
                   }
                 }
+                break;
               }
-              break;
+              case 'loyalty_points':
+              case 'loyalty': {
+                let multiplier = 1.0;
+                const silverMult = Number(config.silverMultiplier ?? 1.2);
+                const goldMult = Number(config.goldMultiplier ?? 1.5);
+                const platMult = Number(config.platinumMultiplier ?? 2.0);
+
+                if (customerTier === 'silver') multiplier = silverMult;
+                if (customerTier === 'gold') multiplier = goldMult;
+                if (customerTier === 'platinum') multiplier = platMult;
+
+                const finalTotal = Math.max(0, subtotal - calcDiscount);
+                const basePoints = Math.floor(finalTotal / 10);
+                calcPoints = Math.floor(basePoints * multiplier);
+                break;
+              }
+              case 'category_voucher': {
+                const catId = config.categoryId;
+                const discType = config.discountType || 'percent';
+                const discVal = Number(config.discountValue || promotion.value || 0);
+
+                if (catId) {
+                  const catSubtotal = cart
+                    .filter(item => {
+                      const matchMed = medicines.find(m => m.id === item.medicineId);
+                      return matchMed && matchMed.categoryId === catId;
+                    })
+                    .reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+                  if (catSubtotal > 0) {
+                    if (discType === 'percent') {
+                      calcDiscount = catSubtotal * (discVal / 100);
+                    } else {
+                      calcDiscount = Math.min(discVal, catSubtotal);
+                    }
+                  }
+                }
+                break;
+              }
             }
-            default:
-              dbPromoApplied = false;
-              break;
+          } catch (e) {
+            console.error(e);
           }
-        } catch (e) {
-          console.error(e);
         }
       }
-    }
 
-    if (!dbPromoApplied) {
-      // Fallback Strategy pattern
-      const getPromoValue = (promoId: string, defaultVal: number) => {
-        const match = promotions.find(p => p.id === promoId);
-        return (match && match.value !== undefined) ? match.value : defaultVal;
-      };
+      if (!isDbPromo) {
+        const getPromoValue = (promoId: string, defaultVal: number) => {
+          const match = promotions.find(p => p.id === promoId);
+          return (match && match.value !== undefined) ? match.value : defaultVal;
+        };
 
-      const calculator = new PromotionCalculator();
-      switch (promoType) {
-        case 'percent_10':
-          calculator.setStrategy(new PercentDiscountStrategy(getPromoValue('percent_10', 10)));
-          break;
-        case 'fixed_20':
-          calculator.setStrategy(new FixedAmountStrategy(getPromoValue('fixed_20', 20)));
-          break;
-        case 'combo_para':
-          calculator.setStrategy(new ComboStrategy('med-1', getPromoValue('combo_para', 5)));
-          break;
-        case 'vip_points':
-          calculator.setStrategy(new PointRewardStrategy());
-          break;
-        default:
-          calculator.setStrategy(new DefaultStrategy());
-          break;
+        const calculator = new PromotionCalculator();
+        switch (pType) {
+          case 'percent_10':
+            calculator.setStrategy(new PercentDiscountStrategy(getPromoValue('percent_10', 10)));
+            break;
+          case 'fixed_20':
+            calculator.setStrategy(new FixedAmountStrategy(getPromoValue('fixed_20', 20)));
+            break;
+          case 'combo_para':
+            calculator.setStrategy(new ComboStrategy('med-1', getPromoValue('combo_para', 5)));
+            break;
+          case 'vip_points':
+            calculator.setStrategy(new PointRewardStrategy());
+            break;
+          case 'buy_1_get_1':
+            calculator.setStrategy(new BuyGiftStrategy('med-1', 1, 'med-1', 1));
+            break;
+          case 'min_order_50':
+            calculator.setStrategy(new ConditionFixedDiscountStrategy(50, getPromoValue('min_order_50', 10)));
+            break;
+          case 'platinum_15':
+            calculator.setStrategy(new TierPercentDiscountStrategy('platinum', getPromoValue('platinum_15', 15)));
+            break;
+          default:
+            calculator.setStrategy(new DefaultStrategy());
+            break;
+        }
+        calcDiscount = calculator.calculateDiscount(orderData);
+        calcPoints = calculator.calculatePoints(orderData);
       }
-      discount = calculator.calculateDiscount(orderData);
-      points = calculator.calculatePoints(orderData);
+
+      return { discount: calcDiscount, points: calcPoints };
+    };
+
+    if (isAutoPromo && cart.length > 0) {
+      let maxDiscount = -1;
+      let maxPoints = -1;
+      let bestPromoId = 'default';
+
+      const eligiblePromos = promotions.filter((p) => {
+        if (p.status !== 'active') return false;
+        if (p.targetBranch && p.targetBranch !== 'all' && p.targetBranch !== selectedBranchId) return false;
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+        if (p.startDate && todayStr < String(p.startDate).substring(0, 10)) return false;
+        if (p.endDate && todayStr > String(p.endDate).substring(0, 10)) return false;
+        if (p.targetGroup && p.targetGroup !== 'all') {
+          const allowedTiers = p.targetGroup.split(',').map((t: string) => t.trim().toLowerCase());
+          if (!allowedTiers.includes(customerTier.toLowerCase())) return false;
+        }
+        return true;
+      });
+
+      const candidates = [...eligiblePromos.map(p => p.id), 'default'];
+      
+      for (const pId of candidates) {
+        const res = calculatePromoEffect(pId);
+        if (res.discount > maxDiscount || (res.discount === maxDiscount && res.points > maxPoints)) {
+          maxDiscount = res.discount;
+          maxPoints = res.points;
+          bestPromoId = pId;
+        }
+      }
+
+      if (bestPromoId !== promoType) {
+        setPromoType(bestPromoId);
+        return;
+      }
     }
 
+    const { discount, points } = calculatePromoEffect(promoType);
     setDiscountAmount(discount);
     setRewardPoints(points);
 
@@ -724,7 +845,7 @@ export function POS() {
       }
     }
     setGiftWarning(giftWarn);
-  }, [subtotal, cart, promoType, customerTier, promotions, medicines]);
+  }, [subtotal, cart, promoType, customerTier, promotions, medicines, isAutoPromo, selectedBranchId]);
 
   const addToCart = (medicine: AvailableMedicine, explicitUnit?: string) => {
     const sellUnit = medicine.sellUnits.find(
@@ -1124,8 +1245,54 @@ export function POS() {
       return;
     }
 
-    // Show immediate loading feedback — disable button, show spinner
     setIsCheckingOut(true);
+    const payload = {
+      cart,
+      customerId: selectedCustomer?.id || 'Khách vãng lai',
+      customerTier,
+      promoType,
+      promoValue: promotions.find((p) => p.id === promoType)?.value,
+      paymentMethod,
+      prescriptionId: prescriptionId || `TOA-${Date.now().toString().slice(-6)}`,
+      capturedImage,
+      branchId: selectedBranchId || undefined,
+    };
+
+    const processOfflineSave = async (isNetworkLoss: boolean = false) => {
+      try {
+        const offlineInvoiceNumber = `INV-OFF-${Date.now().toString().slice(-6)}`;
+        await saveOfflineOrder(payload);
+        const count = await getOfflineOrdersCount();
+        setPendingSyncCount(count);
+        setIsOffline(true);
+
+        // Deduct inventory locally
+        setMedicines(prev => prev.map(med => {
+          const totalBaseDeduct = cart
+            .filter(c => c.medicineId === med.id)
+            .reduce((sum, c) => sum + (c.baseQuantity || 0), 0);
+          return totalBaseDeduct > 0 ? { ...med, stock: med.stock - totalBaseDeduct } : med;
+        }));
+
+        toast.success(
+          isNetworkLoss 
+            ? `✅ Mất kết nối máy chủ. Đã lưu hóa đơn ${offlineInvoiceNumber} (Ngoại tuyến)!` 
+            : `✅ Đã lưu hóa đơn ${offlineInvoiceNumber} (Ngoại tuyến). Hệ thống sẽ đồng bộ khi có mạng.`
+        );
+        resetCheckoutState();
+      } catch (err) {
+        toast.error('Lỗi khi lưu đơn ngoại tuyến vào IndexedDB!');
+      }
+    };
+
+    if (isOffline) {
+      // Offline Flow
+      await processOfflineSave(false);
+      setIsCheckingOut(false);
+      return;
+    }
+
+    // Online Flow
     const checkoutToast = toast.loading('Đang xử lý đơn hàng, vui lòng chờ...');
 
     try {
@@ -1136,44 +1303,55 @@ export function POS() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          cart,
-          customerId: selectedCustomer?.id || 'Khách vãng lai',
-          customerTier,
-          promoType,
-          promoValue: promotions.find((p) => p.id === promoType)?.value,
-          paymentMethod,
-          prescriptionId: prescriptionId || `TOA-${Date.now().toString().slice(-6)}`,
-          capturedImage,
-          branchId: selectedBranchId || undefined,
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Thao tác thanh toán thất bại');
+        const errorMessage = errorData.error || 'Thao tác thanh toán thất bại';
+        if (response.status >= 500) {
+          throw new Error(`SERVER_ERROR: ${errorMessage}`);
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
       toast.dismiss(checkoutToast);
       toast.success(`✅ Hóa đơn ${result.invoiceNumber} đã lưu! (+${result.rewardPoints} Điểm VIP)`);
 
-      // Reset state
-      setCart([]);
-      setBarcode('');
-      setSelectedCustomer(null);
-      setCustomerSearch('');
-      setPrescriptionId('');
-      setCapturedImage(null);
-      setPromoType('default');
+      resetCheckoutState();
       await loadAvailableMedicines(undefined, false);
     } catch (e: any) {
       console.error(e);
       toast.dismiss(checkoutToast);
-      toast.error(e.message || 'Lỗi kết nối máy chủ API!');
+      
+      // Nếu rớt mạng hoàn toàn (Failed to fetch) hoặc backend rớt kết nối Database (Internal server error)
+      const isNetworkError = e instanceof TypeError && e.message === 'Failed to fetch';
+      const msg = e.message?.toLowerCase() || '';
+      const isServerError = msg.includes('server_error:') || 
+                            msg.includes('database') || 
+                            msg.includes('co so du lieu') || 
+                            msg.includes('ket noi') ||
+                            msg.includes('internal server error');
+
+      if (isNetworkError || isServerError) {
+        await processOfflineSave(true);
+      } else {
+        toast.error(e.message || 'Lỗi kết nối máy chủ API!');
+      }
     } finally {
       setIsCheckingOut(false);
     }
+  };
+
+  const resetCheckoutState = () => {
+    setCart([]);
+    setBarcode('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    setPrescriptionId('');
+    setCapturedImage(null);
+    setPromoType('default');
   };
 
   const handleBarcodeSearch = () => {
@@ -1212,6 +1390,33 @@ export function POS() {
           </div>
 
           <div className="flex items-center gap-3 self-end sm:self-auto">
+            {/* Offline Sync Indicator */}
+            {(isOffline || pendingSyncCount > 0) && (
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm border ${
+                isOffline 
+                  ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/50' 
+                  : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/50'
+              }`}>
+                {isOffline ? (
+                  <WifiOff className="h-4 w-4 animate-pulse" />
+                ) : isSyncing ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CloudOff className="h-4 w-4" />
+                )}
+                <span>
+                  {isOffline ? 'Đang ngoại tuyến' : isSyncing ? 'Đang đồng bộ...' : 'Chưa đồng bộ'}
+                  {pendingSyncCount > 0 && ` (${pendingSyncCount} đơn)`}
+                </span>
+                {/* Manual sync button if online but stuck */}
+                {!isOffline && pendingSyncCount > 0 && !isSyncing && (
+                  <button onClick={syncOfflineOrders} className="ml-1 hover:bg-amber-100 dark:hover:bg-amber-900/50 p-1 rounded-md transition-colors">
+                    <RefreshCw className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            )}
+
             {isAdminOrChainManager ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Đang đứng bán tại:</span>
@@ -1779,10 +1984,14 @@ export function POS() {
                 </div>
 
                 {/* Strategy Pattern Selection */}
-                <Select
-                  label="Chương trình Khuyến mãi (Strategy Pattern)"
-                  value={promoType}
-                  onChange={(e) => setPromoType(e.target.value)}
+                <div className="space-y-1">
+                  <Select
+                    label="Chương trình Khuyến mãi (Strategy Pattern)"
+                    value={promoType}
+                    onChange={(e) => {
+                      setPromoType(e.target.value);
+                      setIsAutoPromo(false);
+                    }}
                   options={promotions.length > 0
                     ? promotions
                         .filter((p) => {
@@ -1791,8 +2000,8 @@ export function POS() {
                           
                           // Date range validations
                           const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
-                          if (p.startDate && todayStr < p.startDate) return false;
-                          if (p.endDate && todayStr > p.endDate) return false;
+                          if (p.startDate && todayStr < String(p.startDate).substring(0, 10)) return false;
+                          if (p.endDate && todayStr > String(p.endDate).substring(0, 10)) return false;
                           
                           // Target group tier validations
                           if (p.targetGroup && p.targetGroup !== 'all') {
@@ -1821,6 +2030,13 @@ export function POS() {
                       ]
                   }
                 />
+                <div className="flex justify-end">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="rounded border-input text-primary focus:ring-primary h-3 w-3" checked={isAutoPromo} onChange={(e) => setIsAutoPromo(e.target.checked)} />
+                    <span className="text-[12px] font-medium text-primary select-none">Tự động chọn khuyến mãi tốt nhất</span>
+                  </label>
+                </div>
+              </div>
 
                 {/* Hộp thông báo quà tặng khuyến mãi nếu đủ điều kiện */}
                 {giftWarning && (

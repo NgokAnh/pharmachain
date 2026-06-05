@@ -102,6 +102,91 @@ export class ComboStrategy implements PromotionStrategy {
   }
 }
 
+export class BuyGiftStrategy implements PromotionStrategy {
+  constructor(
+    private buyMedicineId: string,
+    private buyQty: number,
+    private giftMedicineId: string,
+    private giftQty: number
+  ) {}
+
+  calculateDiscount(order: Order): number {
+    const buyItem = order.items.find(i => i.medicineId === this.buyMedicineId);
+    if (buyItem && buyItem.quantity >= this.buyQty) {
+      const times = Math.floor(buyItem.quantity / this.buyQty);
+      const giftItem = order.items.find(i => i.medicineId === this.giftMedicineId);
+      if (giftItem) {
+        const eligibleGiftQty = times * this.giftQty;
+        const discountQty = Math.min(giftItem.quantity, eligibleGiftQty);
+        const unitPrice = giftItem.price / giftItem.quantity;
+        return discountQty * unitPrice;
+      }
+    }
+    return 0;
+  }
+
+  calculatePoints(order: Order): number {
+    const finalTotal = order.subtotal - this.calculateDiscount(order);
+    return Math.floor(finalTotal / 10);
+  }
+
+  getName(): string {
+    return `Mua tặng quà`;
+  }
+
+  getDescription(): string {
+    return `Mua ${this.buyQty} sản phẩm sẽ được tặng ${this.giftQty} sản phẩm kèm theo`;
+  }
+}
+
+export class ConditionFixedDiscountStrategy implements PromotionStrategy {
+  constructor(private minOrder: number, private discountAmount: number) {}
+
+  calculateDiscount(order: Order): number {
+    if (order.subtotal >= this.minOrder) {
+      return Math.min(this.discountAmount, order.subtotal);
+    }
+    return 0;
+  }
+
+  calculatePoints(order: Order): number {
+    const finalTotal = order.subtotal - this.calculateDiscount(order);
+    return Math.floor(finalTotal / 10);
+  }
+
+  getName(): string {
+    return `Giảm giá điều kiện`;
+  }
+
+  getDescription(): string {
+    return `Giảm $${this.discountAmount} cho đơn từ $${this.minOrder}`;
+  }
+}
+
+export class TierPercentDiscountStrategy implements PromotionStrategy {
+  constructor(private requiredTier: string, private percent: number) {}
+
+  calculateDiscount(order: Order): number {
+    if (order.customerTier === this.requiredTier || (this.requiredTier === 'gold' && order.customerTier === 'platinum')) {
+      return order.subtotal * (this.percent / 100);
+    }
+    return 0;
+  }
+
+  calculatePoints(order: Order): number {
+    const finalTotal = order.subtotal - this.calculateDiscount(order);
+    return Math.floor(finalTotal / 10);
+  }
+
+  getName(): string {
+    return `Khuyến mãi nhóm Hạng VIP`;
+  }
+
+  getDescription(): string {
+    return `Giảm giá ${this.percent}% dành riêng cho khách hàng hạng ${this.requiredTier.toUpperCase()}`;
+  }
+}
+
 // 4. Chiến lược nhân đôi/nhân hệ số điểm thưởng cho khách hàng thân thiết
 export class PointRewardStrategy implements PromotionStrategy {
   calculateDiscount(order: Order): number {

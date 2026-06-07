@@ -15,6 +15,7 @@ import {
 } from '../../components/ui/Table';
 import { Card } from '../../components/ui/Card';
 import { Search, AlertCircle, Package } from 'lucide-react';
+import { apiUrl } from '../../config/api';
 
 interface StockItem {
   id: string;
@@ -39,7 +40,7 @@ export function Inventory() {
       try {
         const token = localStorage.getItem('pharmacy_token');
         if (!token) return;
-        const response = await fetch('http://localhost:3000/api/inventory', {
+        const response = await fetch(apiUrl('/inventory'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }

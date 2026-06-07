@@ -16,6 +16,7 @@ import {
 import { ArrowLeft, Save, Plus, Trash2, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
+import { apiUrl } from '../../config/api';
 
 interface InventoryLot {
   id: string;
@@ -42,7 +43,6 @@ interface TransferItem {
   requestedQuantity: number;
 }
 
-const API_BASE = 'http://localhost:3000/api';
 const getToken = () => localStorage.getItem('pharmacy_token');
 
 export function TransferForm() {
@@ -71,7 +71,7 @@ export function TransferForm() {
   // Load branches and inventory lots for the user's branch
   const loadBranches = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/branches`, {
+      const res = await fetch(apiUrl('/branches'), {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) {
@@ -90,7 +90,7 @@ export function TransferForm() {
     setLoadingMedicines(true);
     try {
       // Load inventory lots for this branch
-      const res = await fetch(`${API_BASE}/branches/${targetBranchId}`, {
+      const res = await fetch(apiUrl(`/branches/${targetBranchId}`), {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error();

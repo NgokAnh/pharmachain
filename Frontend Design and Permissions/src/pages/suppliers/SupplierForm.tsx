@@ -7,6 +7,7 @@ import { Select } from '../../components/ui/Select';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 // Mock data - giống với dữ liệu trong SupplierList
 const mockSuppliers = Array.from({ length: 35 }, (_, i) => ({
@@ -67,7 +68,7 @@ export function SupplierForm() {
       const loadSupplier = async () => {
         try {
           const token = localStorage.getItem('pharmacy_token');
-          const response = await fetch(`http://localhost:3000/api/suppliers/${id}`, {
+          const response = await fetch(apiUrl(`/suppliers/${id}`), {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (!response.ok) throw new Error('Không thể tải thông tin nhà cung cấp');
@@ -138,9 +139,9 @@ export function SupplierForm() {
     setLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const url = isEdit 
-        ? `http://localhost:3000/api/suppliers/${id}` 
-        : `http://localhost:3000/api/suppliers`;
+      const url = isEdit
+        ? apiUrl(`/suppliers/${id}`)
+        : apiUrl('/suppliers');
       const method = isEdit ? 'PUT' : 'POST';
 
       const response = await fetch(url, {

@@ -15,6 +15,7 @@ import {
 import { Card } from '../../components/ui/Card';
 import { Search, User, Activity } from 'lucide-react';
 import { AuditLog as AuditLogType } from '../../types';
+import { apiUrl } from '../../config/api';
 
 const actionTypes = [
   { value: 'create', label: 'Tạo mới', color: 'success' as const },
@@ -59,7 +60,7 @@ export function AuditLog() {
       try {
         const token = localStorage.getItem('pharmacy_token');
         if (!token) return;
-        const response = await fetch('http://localhost:3000/api/audit', {
+        const response = await fetch(apiUrl('/audit'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }

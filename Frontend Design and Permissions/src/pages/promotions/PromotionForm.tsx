@@ -8,6 +8,7 @@ import { Select } from '../../components/ui/Select';
 import { ArrowLeft, Save, Sparkles, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { getTransactionUnitOptions } from '../../utils/medicineUnits';
+import { apiUrl } from '../../config/api';
 
 interface MedicineOption {
   id: string;
@@ -92,21 +93,21 @@ export function PromotionForm() {
         const headers = { Authorization: `Bearer ${token}` };
 
         // Fetch medicines
-        const medRes = await fetch('http://localhost:3000/api/medicines', { headers });
+        const medRes = await fetch(apiUrl('/medicines'), { headers });
         if (medRes.ok) {
           const data = await medRes.json();
           setMedicines(data);
         }
 
         // Fetch categories
-        const catRes = await fetch('http://localhost:3000/api/categories', { headers });
+        const catRes = await fetch(apiUrl('/categories'), { headers });
         if (catRes.ok) {
           const data = await catRes.json();
           setCategories(data);
         }
 
         // Fetch branches
-        const brRes = await fetch('http://localhost:3000/api/branches', { headers });
+        const brRes = await fetch(apiUrl('/branches'), { headers });
         if (brRes.ok) {
           const data = await brRes.json();
           setBranches(data);
@@ -127,7 +128,7 @@ export function PromotionForm() {
       setFetching(true);
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch(`http://localhost:3000/api/promotions/${id}`, {
+        const response = await fetch(apiUrl(`/promotions/${id}`), {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -251,7 +252,7 @@ export function PromotionForm() {
 
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const url = isEdit ? `http://localhost:3000/api/promotions/${id}` : 'http://localhost:3000/api/promotions';
+      const url = isEdit ? apiUrl(`/promotions/${id}`) : apiUrl('/promotions');
       const method = isEdit ? 'PUT' : 'POST';
 
       const response = await fetch(url, {

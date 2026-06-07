@@ -11,6 +11,7 @@ import {
   TrendingUp, RefreshCw, Clock,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { apiUrl } from '../../config/api';
 
 interface SummaryData {
   totalRevenue: number;
@@ -77,10 +78,10 @@ export function Reports() {
       const headers = { Authorization: `Bearer ${token}` };
 
       const [summaryRes, trendRes, medsRes, custRes] = await Promise.all([
-        fetch('http://localhost:3000/api/reports/summary', { headers }),
-        fetch('http://localhost:3000/api/reports/sales-trend', { headers }),
-        fetch('http://localhost:3000/api/reports/top-medicines', { headers }),
-        fetch('http://localhost:3000/api/reports/customer-stats', { headers }),
+        fetch(apiUrl('/reports/summary'), { headers }),
+        fetch(apiUrl('/reports/sales-trend'), { headers }),
+        fetch(apiUrl('/reports/top-medicines'), { headers }),
+        fetch(apiUrl('/reports/customer-stats'), { headers }),
       ]);
 
       if (!summaryRes.ok || !trendRes.ok || !medsRes.ok || !custRes.ok) {

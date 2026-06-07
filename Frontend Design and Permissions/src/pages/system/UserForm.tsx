@@ -9,6 +9,7 @@ import { Badge } from '../../components/ui/Badge';
 import { ArrowLeft, Save, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../../types';
+import { apiUrl } from '../../config/api';
 
 interface BranchOption {
   id: string;
@@ -70,7 +71,7 @@ export function UserForm() {
     const fetchBranches = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/branches', {
+        const response = await fetch(apiUrl('/branches'), {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (response.ok) {
@@ -91,7 +92,7 @@ export function UserForm() {
       const fetchUser = async () => {
         try {
           const token = localStorage.getItem('pharmacy_token');
-          const response = await fetch(`http://localhost:3000/api/users/${id}`, {
+          const response = await fetch(apiUrl(`/users/${id}`), {
             headers: { Authorization: `Bearer ${token}` },
           });
 
@@ -199,8 +200,8 @@ export function UserForm() {
     try {
       const token = localStorage.getItem('pharmacy_token');
       const url = isEdit
-        ? `http://localhost:3000/api/users/${id}`
-        : 'http://localhost:3000/api/users';
+        ? apiUrl(`/users/${id}`)
+        : apiUrl('/users');
       const method = isEdit ? 'PUT' : 'POST';
 
       const body: any = {

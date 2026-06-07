@@ -15,6 +15,7 @@ import {
   getUnitLabel,
   resolveFactorToBaseUnit,
 } from '../../utils/medicineUnits';
+import { apiUrl } from '../../config/api';
 
 interface PurchaseItem {
   id: string;
@@ -108,7 +109,7 @@ export function PurchaseForm() {
         throw new Error('Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.');
       }
 
-      const response = await fetch('http://localhost:3000/api/medicines', {
+      const response = await fetch(apiUrl('/medicines'), {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -132,7 +133,7 @@ export function PurchaseForm() {
   const loadSuppliers = async () => {
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch('http://localhost:3000/api/suppliers', {
+      const response = await fetch(apiUrl('/suppliers'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (response.ok) {
@@ -253,7 +254,7 @@ export function PurchaseForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('http://localhost:3000/api/purchases/receive', {
+      const response = await fetch(apiUrl('/purchases/receive'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

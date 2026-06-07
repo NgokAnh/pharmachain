@@ -15,7 +15,7 @@ import {
 import { Plus, Search, FileText } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
-const API_BASE = 'http://localhost:3000/api';
+import { apiUrl } from '../../config/api';
 
 interface InventoryCheck {
   id: string;
@@ -39,7 +39,7 @@ export function InventoryCheckList() {
     const fetchChecks = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const res = await fetch(`${API_BASE}/inventory-checks`, {
+        const res = await fetch(apiUrl('/inventory-checks'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {

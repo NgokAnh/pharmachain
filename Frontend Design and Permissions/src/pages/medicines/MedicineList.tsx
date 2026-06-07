@@ -18,6 +18,7 @@ import { Card } from '../../components/ui/Card';
 import { Plus, Search, Eye, Edit } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Medicine } from '../../types';
+import { apiUrl } from '../../config/api';
 
 const mockMedicines: Medicine[] = [
   {
@@ -166,7 +167,7 @@ export function MedicineList() {
     const fetchMedicines = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/medicines', {
+        const response = await fetch(apiUrl('/medicines'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }

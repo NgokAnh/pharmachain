@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
-const API_BASE = 'http://localhost:3000/api';
+import { apiUrl } from '../../config/api';
 
 interface TransferItem {
   id: string;
@@ -69,10 +69,10 @@ export function WarehouseOperations() {
     setLoading(true);
     try {
       const [transfersRes, branchesRes] = await Promise.all([
-        fetch(`${API_BASE}/transfers`, {
+        fetch(apiUrl('/transfers'), {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
-        fetch(`${API_BASE}/branches`, {
+        fetch(apiUrl('/branches'), {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
       ]);

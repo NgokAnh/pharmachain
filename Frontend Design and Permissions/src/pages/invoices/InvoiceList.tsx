@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '../../components/ui/Table';
 import { useAuth } from '../../contexts/AuthContext';
+import { apiUrl } from '../../config/api';
 import {
   Receipt,
   Search,
@@ -119,7 +120,7 @@ export function InvoiceList() {
       const fetchBranches = async () => {
         try {
           const token = localStorage.getItem('pharmacy_token');
-          const response = await fetch('http://localhost:3000/api/branches', {
+          const response = await fetch(apiUrl('/branches'), {
             headers: {
               'Authorization': `Bearer ${token}`
             }
@@ -159,7 +160,7 @@ export function InvoiceList() {
         }
 
         try {
-          const response = await fetch(`http://localhost:3000/api/pos/invoices?${params.toString()}`, {
+          const response = await fetch(apiUrl(`/pos/invoices?${params.toString()}`), {
             headers: {
               'Authorization': `Bearer ${token}`
             }

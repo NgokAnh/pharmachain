@@ -3,6 +3,7 @@ import { Header } from '../../components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { apiUrl } from '../../config/api';
 import {
   Table,
   TableBody,
@@ -46,7 +47,7 @@ export function PrescriptionList() {
       try {
         const token = localStorage.getItem('pharmacy_token');
         if (!token) return;
-        const response = await fetch('http://localhost:3000/api/pos/prescriptions', {
+        const response = await fetch(apiUrl('/pos/prescriptions'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }

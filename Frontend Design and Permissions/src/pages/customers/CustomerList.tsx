@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { Customer } from '../../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../app/components/ui/dialog';
 import { CustomerForm } from './CustomerForm';
+import { apiUrl } from '../../config/api';
 
 export function CustomerList() {
   const navigate = useNavigate();
@@ -40,7 +41,7 @@ export function CustomerList() {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
 
-      const response = await fetch(`http://localhost:3000/api/customers?${params.toString()}`, {
+      const response = await fetch(apiUrl(`/customers?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -84,7 +85,7 @@ export function CustomerList() {
 
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/customers/${customer.id}`, {
+      const response = await fetch(apiUrl(`/customers/${customer.id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -47,6 +47,8 @@ Thư mục backend đảm nhận vai trò cung cấp API, xác thực và lưu t
    JWT_SECRET="pharmachain_super_secret_jwt_signature_key_2026"
    ```
    *(Lưu ý: Bạn hãy thay đổi `DATABASE_URL` cho đúng với cấu hình tài khoản PostgreSQL trên máy mới của bạn)*
+   
+   Nếu bạn muốn chia sẻ project cho người khác, hãy giữ giá trị thật trong `backend/.env` ở máy của bạn và chỉ gửi kèm `backend/.env.example`. File `backend/.env` đang nằm trong `.gitignore` nên sẽ không được push lên repo nếu bạn không cố ý add nó.
 
 3. **Cài đặt thư viện dependencies:**
    ```bash
@@ -98,6 +100,11 @@ Thư mục frontend chứa giao diện người dùng (React SPA).
    ```
    Vite sẽ biên dịch và chạy ứng dụng cục bộ tại địa chỉ mặc định `http://localhost:5173`. Hãy nhấp vào liên kết trên terminal hoặc mở trình duyệt web truy cập địa chỉ này để bắt đầu trải nghiệm giao diện quản trị chuỗi nhà thuốc.
 
+4. **Cấu hình API cho Frontend:**
+   - Nếu backend chạy ở địa chỉ mặc định, bạn không cần làm gì thêm vì frontend sẽ tự dùng `http://localhost:3000/api`.
+   - Nếu backend chạy ở host hoặc cổng khác, tạo file `.env` trong thư mục `Frontend Design and Permissions/` và đặt `VITE_API_BASE_URL` tương ứng.
+   - File mẫu đã có sẵn ở `Frontend Design and Permissions/.env.example` để người khác copy khi nhận project.
+
 ---
 
 ## III. Danh sách Tài khoản Kiểm thử (Seeded Users)
@@ -134,6 +141,14 @@ Sau khi chạy tiến trình `npm run prisma:seed` ở Backend, cơ sở dữ li
 3. **Lỗi: Giao diện hiển thị trống, không thể tải dữ liệu**
    - Đảm bảo Backend đã khởi chạy thành công tại địa chỉ `http://localhost:3000`.
    - Kiểm tra xem cổng kết nối API mặc định trong Frontend có bị thay đổi không. Theo mặc định, Frontend sẽ gọi trực tiếp đến `http://localhost:3000/api/...`.
+
+## V. Chia sẻ Project An Toàn
+
+Khi commit và push lên Git, chỉ các file mẫu như `backend/.env.example` và `Frontend Design and Permissions/.env.example` nên đi kèm repo.
+
+- `backend/.env` chứa secret thật phải ở máy local và không nên commit.
+- `Frontend Design and Permissions/.env` nếu có chỉ nên chứa giá trị cấu hình không nhạy cảm như `VITE_API_BASE_URL`.
+- Nếu lỡ từng commit secret vào lịch sử Git, hãy coi như secret đã bị lộ và đổi giá trị đó ngay.
 
 ---
 

@@ -17,6 +17,7 @@ import { Plus, Search, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { UserRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 interface SystemUser {
   id: string;
@@ -47,7 +48,7 @@ export function UserManagement() {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
 
-      const response = await fetch(`http://localhost:3000/api/users?${params.toString()}`, {
+      const response = await fetch(apiUrl(`/users?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -90,7 +91,7 @@ export function UserManagement() {
 
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/users/${user.id}`, {
+      const response = await fetch(apiUrl(`/users/${user.id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

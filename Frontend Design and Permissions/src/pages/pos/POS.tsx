@@ -27,6 +27,7 @@ import {
 } from './strategies';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../app/components/ui/dialog';
 import { CustomerForm } from '../customers/CustomerForm';
+import { apiUrl } from '../../config/api';
 
 interface InventoryLotResponse {
   id: string;
@@ -273,8 +274,8 @@ export function POS() {
       }
 
       const url = selectedBranchId
-        ? `http://localhost:3000/api/inventory?branchId=${selectedBranchId}`
-        : 'http://localhost:3000/api/inventory';
+        ? apiUrl(`/inventory?branchId=${selectedBranchId}`)
+        : apiUrl('/inventory');
 
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -367,7 +368,7 @@ export function POS() {
       
       for (const order of orders) {
         try {
-          const response = await fetch('http://localhost:3000/api/pos/checkout', {
+          const response = await fetch(apiUrl('/pos/checkout'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -410,7 +411,7 @@ export function POS() {
     const fetchBranches = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/branches', {
+        const response = await fetch(apiUrl('/branches'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (response.ok) {
@@ -446,7 +447,7 @@ export function POS() {
       setIsCustomerSearching(true);
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch(`http://localhost:3000/api/customers?search=${encodeURIComponent(customerSearch)}`, {
+        const response = await fetch(apiUrl(`/customers?search=${encodeURIComponent(customerSearch)}`), {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (response.ok) {
@@ -496,7 +497,7 @@ export function POS() {
     const fetchPromotions = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/promotions', {
+        const response = await fetch(apiUrl('/promotions'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (response.ok) {
@@ -1297,7 +1298,7 @@ export function POS() {
 
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch('http://localhost:3000/api/pos/checkout', {
+      const response = await fetch(apiUrl('/pos/checkout'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

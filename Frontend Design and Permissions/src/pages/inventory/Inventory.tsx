@@ -15,6 +15,7 @@ import {
 import { Card } from '../../components/ui/Card';
 import { Search, AlertCircle, Package, RefreshCw } from 'lucide-react';
 import { InventoryLine } from '../../types';
+import { apiUrl } from '../../config/api';
 
 const LOW_STOCK_THRESHOLD = 50;
 
@@ -37,7 +38,7 @@ export function Inventory() {
         throw new Error('Phien dang nhap da het. Vui long dang nhap lai.');
       }
 
-      const response = await fetch('http://localhost:3000/api/inventory', {
+      const response = await fetch(apiUrl('/inventory'), {
         headers: {
           Authorization: `Bearer ${token}`
         }

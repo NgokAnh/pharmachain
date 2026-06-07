@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { User, AuthContextType, Permission, UserRole } from '../types';
+import { apiUrl } from '../config/api';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -195,7 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (username: string, password: string, branchId?: string) => {
     try {
-      const response = await fetch('http://localhost:3000/api/auth/login', {
+      const response = await fetch(apiUrl('/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

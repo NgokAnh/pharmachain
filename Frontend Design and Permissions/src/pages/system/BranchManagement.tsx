@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Branch } from '../../types';
+import { apiUrl } from '../../config/api';
 
 export function BranchManagement() {
   const [searchParams] = useSearchParams();
@@ -57,7 +58,7 @@ export function BranchManagement() {
   const loadBranches = async () => {
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch('http://localhost:3000/api/branches', {
+          const response = await fetch(apiUrl('/branches'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -79,7 +80,7 @@ export function BranchManagement() {
     setLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/branches/${id}`, {
+      const response = await fetch(apiUrl(`/branches/${id}`), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -174,7 +175,7 @@ export function BranchManagement() {
     setLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/branches/${branch.id}`, {
+      const response = await fetch(apiUrl(`/branches/${branch.id}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -208,8 +209,8 @@ export function BranchManagement() {
     try {
       const token = localStorage.getItem('pharmacy_token');
       const url = editingBranch
-        ? `http://localhost:3000/api/branches/${editingBranch.id}`
-        : `http://localhost:3000/api/branches`;
+        ? apiUrl(`/branches/${editingBranch.id}`)
+        : apiUrl('/branches');
       const method = editingBranch ? 'PUT' : 'POST';
 
       const response = await fetch(url, {

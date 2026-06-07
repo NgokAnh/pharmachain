@@ -15,6 +15,7 @@ import {
 import { ShoppingCart, Plus, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 export function PurchaseList() {
   const navigate = useNavigate();
@@ -29,7 +30,7 @@ export function PurchaseList() {
     const fetchReceipts = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/purchases', {
+        const response = await fetch(apiUrl('/purchases'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Không thể tải danh sách phiếu nhập kho');

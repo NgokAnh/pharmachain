@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
 import { ArrowLeft, Edit, Phone, Mail, MapPin, CreditCard, Building, Package, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 const mockPurchaseHistory = Array.from({ length: 15 }, (_, i) => ({
   id: `po-${i + 1}`,
@@ -39,7 +40,7 @@ export function SupplierDetail() {
     const loadSupplier = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch(`http://localhost:3000/api/suppliers/${id}`, {
+        const response = await fetch(apiUrl(`/suppliers/${id}`), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Không thể tải chi tiết nhà cung cấp');

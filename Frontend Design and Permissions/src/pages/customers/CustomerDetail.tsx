@@ -15,6 +15,7 @@ import {
 } from '../../components/ui/Table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
 import { ArrowLeft, Edit, Phone, Mail, MapPin, Calendar, Award, ShoppingBag, DollarSign, TrendingUp, RefreshCw } from 'lucide-react';
+import { apiUrl } from '../../config/api';
 
 interface SalesOrder {
   id: string;
@@ -70,7 +71,7 @@ export function CustomerDetail() {
       const token = localStorage.getItem('pharmacy_token');
       if (!token) throw new Error('Phiên đăng nhập đã hết.');
 
-      const response = await fetch(`http://localhost:3000/api/customers/${id}`, {
+      const response = await fetch(apiUrl(`/customers/${id}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
 

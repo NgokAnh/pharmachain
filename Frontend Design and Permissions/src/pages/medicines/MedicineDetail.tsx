@@ -16,6 +16,7 @@ import {
 import { ArrowLeft, Edit } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { InventoryLine, Medicine, StockMovement, MedicinePriceHistory } from '../../types';
+import { apiUrl } from '../../config/api';
 
 const unitLabelMap: Record<string, string> = {
   vien: 'Viên',
@@ -83,7 +84,7 @@ export function MedicineDetail() {
         const token = localStorage.getItem('pharmacy_token');
         
         // 1. Fetch medicine detail
-        const medResponse = await fetch(`http://localhost:3000/api/medicines/${id}`, {
+        const medResponse = await fetch(apiUrl(`/medicines/${id}`), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!medResponse.ok) throw new Error('Không thể tải chi tiết thuốc');
@@ -91,7 +92,7 @@ export function MedicineDetail() {
         setMedicine(medData);
 
         // 2. Fetch inventory lots and filter for this medicine
-        const invResponse = await fetch(`http://localhost:3000/api/inventory`, {
+        const invResponse = await fetch(apiUrl('/inventory'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (invResponse.ok) {

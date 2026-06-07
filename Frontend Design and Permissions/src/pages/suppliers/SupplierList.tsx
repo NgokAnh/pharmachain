@@ -17,6 +17,7 @@ import { Card } from '../../components/ui/Card';
 import { Plus, Search, Edit, Eye, Phone, Mail } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Supplier } from '../../types';
+import { apiUrl } from '../../config/api';
 
 export function SupplierList() {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export function SupplierList() {
   const loadSuppliers = async () => {
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch('http://localhost:3000/api/suppliers', {
+      const response = await fetch(apiUrl('/suppliers'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }

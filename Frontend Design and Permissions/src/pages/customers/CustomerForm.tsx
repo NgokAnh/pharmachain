@@ -7,6 +7,7 @@ import { Select } from '../../components/ui/Select';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 export function CustomerForm({ 
   id: propId, 
@@ -44,7 +45,7 @@ export function CustomerForm({
       const loadCustomer = async () => {
         try {
           const token = localStorage.getItem('pharmacy_token');
-          const response = await fetch(`http://localhost:3000/api/customers/${id}`, {
+          const response = await fetch(apiUrl(`/customers/${id}`), {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (!response.ok) throw new Error('Không thể tải thông tin khách hàng');
@@ -114,8 +115,8 @@ export function CustomerForm({
     try {
       const token = localStorage.getItem('pharmacy_token');
       const url = isEdit 
-        ? `http://localhost:3000/api/customers/${id}` 
-        : `http://localhost:3000/api/customers`;
+        ? apiUrl(`/customers/${id}`)
+        : apiUrl('/customers');
       const method = isEdit ? 'PUT' : 'POST';
 
       const response = await fetch(url, {

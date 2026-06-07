@@ -18,6 +18,7 @@ import { Card } from '../../components/ui/Card';
 import { Plus, Search, Eye, ArrowRight, Package, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 interface TransferItem {
   id: string;
@@ -44,8 +45,6 @@ interface Transfer {
   createdAt: string;
 }
 
-const API_BASE = 'http://localhost:3000/api';
-
 const getToken = () => localStorage.getItem('pharmacy_token');
 
 export function TransferList() {
@@ -63,7 +62,7 @@ export function TransferList() {
 
   const loadBranches = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/branches`, {
+      const res = await fetch(apiUrl('/branches'), {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) {
@@ -78,7 +77,7 @@ export function TransferList() {
   const loadTransfers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/transfers`, {
+      const res = await fetch(apiUrl('/transfers'), {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error('Không thể tải danh sách phiếu chuyển kho');

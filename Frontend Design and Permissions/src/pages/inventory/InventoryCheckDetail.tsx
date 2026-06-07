@@ -15,7 +15,7 @@ import {
 import { ArrowLeft, Check, X, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
-const API_BASE = 'http://localhost:3000/api';
+import { apiUrl } from '../../config/api';
 
 interface InventoryCheckItem {
   id: string;
@@ -52,7 +52,7 @@ export function InventoryCheckDetail() {
     const fetchCheck = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const res = await fetch(`${API_BASE}/inventory-checks/${id}`, {
+        const res = await fetch(apiUrl(`/inventory-checks/${id}`), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
@@ -76,7 +76,7 @@ export function InventoryCheckDetail() {
     setActionLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const res = await fetch(`${API_BASE}/inventory-checks/${check.id}/approve`, {
+      const res = await fetch(apiUrl(`/inventory-checks/${check.id}/approve`), {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` }
       });

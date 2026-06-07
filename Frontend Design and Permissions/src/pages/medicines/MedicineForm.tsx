@@ -7,6 +7,7 @@ import { Select } from '../../components/ui/Select';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 const saleCategoryOptions = [
   { value: 'OTC', label: 'Thuốc không kê đơn' },
@@ -137,7 +138,7 @@ export function MedicineForm() {
     const loadCategories = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/categories', {
+        const response = await fetch(apiUrl('/categories'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (response.ok) {
@@ -154,7 +155,7 @@ export function MedicineForm() {
     const loadSuppliers = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/suppliers', {
+        const response = await fetch(apiUrl('/suppliers'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (response.ok) {
@@ -178,7 +179,7 @@ export function MedicineForm() {
         setLoading(true);
         try {
           const token = localStorage.getItem('pharmacy_token');
-          const response = await fetch(`http://localhost:3000/api/medicines/${id}`, {
+          const response = await fetch(apiUrl(`/medicines/${id}`), {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (!response.ok) throw new Error('Không thể tải thông tin thuốc');
@@ -263,7 +264,7 @@ export function MedicineForm() {
       setLoading(true);
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const url = isEdit ? `http://localhost:3000/api/medicines/${id}` : `http://localhost:3000/api/medicines`;
+        const url = isEdit ? apiUrl(`/medicines/${id}`) : apiUrl('/medicines');
         const method = isEdit ? 'PUT' : 'POST';
         
         const response = await fetch(url, {

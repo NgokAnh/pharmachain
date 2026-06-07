@@ -4,6 +4,7 @@ import { Header } from '../components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { toast } from 'sonner';
+import { apiUrl } from '../config/api';
 import {
   TrendingUp,
   Package,
@@ -35,7 +36,7 @@ export function Dashboard() {
     const loadStats = async () => {
       try {
         const token = localStorage.getItem('pharmacy_token');
-        const response = await fetch('http://localhost:3000/api/dashboard/stats', {
+        const response = await fetch(apiUrl('/dashboard/stats'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Không thể tải dữ liệu thống kê');

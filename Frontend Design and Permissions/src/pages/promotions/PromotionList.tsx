@@ -32,6 +32,7 @@ import {
 import { toast } from 'sonner';
 import { Promotion } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { apiUrl } from '../../config/api';
 
 export function PromotionList() {
   const navigate = useNavigate();
@@ -55,7 +56,7 @@ export function PromotionList() {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (typeFilter !== 'all') params.append('type', typeFilter);
 
-      const response = await fetch(`http://localhost:3000/api/promotions?${params.toString()}`, {
+      const response = await fetch(apiUrl(`/promotions?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -97,7 +98,7 @@ export function PromotionList() {
 
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/promotions/${promo.id}`, {
+      const response = await fetch(apiUrl(`/promotions/${promo.id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });

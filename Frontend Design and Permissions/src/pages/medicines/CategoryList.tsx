@@ -15,6 +15,7 @@ import {
 } from '../../components/ui/Table';
 import { Plus, Search, Edit, Trash2, Tag } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUrl } from '../../config/api';
 
 interface Category {
   id: string;
@@ -119,7 +120,7 @@ export function CategoryList() {
   const loadCategories = async () => {
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch('http://localhost:3000/api/categories', {
+      const response = await fetch(apiUrl('/categories'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -172,7 +173,7 @@ export function CategoryList() {
     setLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const response = await fetch(`http://localhost:3000/api/categories/${category.id}`, {
+      const response = await fetch(apiUrl(`/categories/${category.id}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -199,9 +200,9 @@ export function CategoryList() {
     setLoading(true);
     try {
       const token = localStorage.getItem('pharmacy_token');
-      const url = editingCategory 
-        ? `http://localhost:3000/api/categories/${editingCategory.id}` 
-        : `http://localhost:3000/api/categories`;
+      const url = editingCategory
+        ? apiUrl(`/categories/${editingCategory.id}`)
+        : apiUrl('/categories');
       const method = editingCategory ? 'PUT' : 'POST';
 
       const response = await fetch(url, {

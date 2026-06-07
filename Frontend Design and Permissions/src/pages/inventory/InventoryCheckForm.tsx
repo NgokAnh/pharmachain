@@ -16,7 +16,7 @@ import {
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
-const API_BASE = 'http://localhost:3000/api';
+import { apiUrl } from '../../config/api';
 
 interface CheckItem {
   medicineId: string;
@@ -42,7 +42,7 @@ export function InventoryCheckForm() {
 
   useEffect(() => {
     if (isAdminOrChainManager) {
-      fetch(`${API_BASE}/branches`, {
+      fetch(apiUrl('/branches'), {
         headers: { Authorization: `Bearer ${localStorage.getItem('pharmacy_token')}` }
       })
       .then(res => res.json())
@@ -58,7 +58,7 @@ export function InventoryCheckForm() {
     }
     
     setLoading(true);
-    fetch(`${API_BASE}/branches/${selectedBranchId}`, {
+    fetch(apiUrl(`/branches/${selectedBranchId}`), {
       headers: { Authorization: `Bearer ${localStorage.getItem('pharmacy_token')}` }
     })
     .then(res => res.json())
@@ -97,7 +97,7 @@ export function InventoryCheckForm() {
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}/inventory-checks`, {
+      const res = await fetch(apiUrl('/inventory-checks'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
